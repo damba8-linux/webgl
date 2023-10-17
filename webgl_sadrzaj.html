@@ -1,0 +1,110 @@
+<html> 
+<head> 
+<meta charset="utf-8">  
+  <title>webgl2</title> 			
+  <script src="lib/jquery-3.3.1.min.js"></script>
+  <script src="lib/bootstrap.min.js"></script>
+  <link rel="stylesheet" href="lib/bootstrap.min.css">
+  <style>
+  body {
+    margin: 0px;
+    background-color: #FFF5EE;
+  }
+  .list-group-item.active {
+    background-color: grey;
+    border-color: grey; }
+  </style>
+</head> 
+          
+<body>
+<div class="alert alert-dark" role="alert" style="margin-bottom:30px; position:sticky; top:0px; z-index:10; display:flex; padding-bottom:0px;">
+<h1 style="text-align:left;">Razni webgl primjeri</h1>
+</div>
+
+<div class="container">
+  <div class="list-group" style="margin-bottom:50px;">
+    <li class="list-group-item active"><b>Gouraud i Phong sjenčanje na kocki</b></li>
+    <a href="kocka1_gouraud.html" class="list-group-item list-group-item-warning list-group-item-action" target="_blank">
+    Gouraud sjenčanje s <i>oštrim</i> rubovima kocke
+    </a>
+    <a href="kocka2_gouraud.html" class="list-group-item list-group-item-warning list-group-item-action" target="_blank">
+    Gouraud sjenčanje s <i>glatkim</i> rubovima kocke
+    </a>
+    <a href="kocka3_phong.html" class="list-group-item list-group-item-warning list-group-item-action" target="_blank">
+    Phong sjenčanje s <i>oštrim</i> rubovima kocke
+    </a>
+    <a href="kocka4_phong.html" class="list-group-item list-group-item-warning list-group-item-action" target="_blank">
+    Phong sjenčanje s <i>glatkim</i> rubovima kocke
+    </a>
+  </div>
+
+  <div class="list-group" style="margin-bottom:50px;">
+    <li class="list-group-item active"><b>Osvjetljenje i bojanje</b></li>
+    <a href="kocka5.html" class="list-group-item list-group-item-warning list-group-item-action" target="_blank">
+    Gouraud sjenčanje i bojanje sa statičnim izvorom svjetlosti
+    </a>
+    <a href="kocka6.html" class="list-group-item list-group-item-warning list-group-item-action" target="_blank">
+    Gouraud sjenčanje i bojanje s pokretnim izvorom svjetlosti
+    </a>
+    <a href="kocka7.html" class="list-group-item list-group-item-warning list-group-item-action" target="_blank">
+    Phong sjenčanje i bojanje sa statičnim izvorom svjetlosti
+    </a>
+    <a href="kocka8.html" class="list-group-item list-group-item-warning list-group-item-action" target="_blank">
+    Phong sjenčanje i bojanje s pokretnim izvorom svjetlosti
+    </a>
+  </div>
+
+  <div class="list-group" style="margin-bottom:50px;">
+  <li class="list-group-item active"><b>Prednji i stražnji materijal</b></li>
+  <a href="kocka9.html" class="list-group-item list-group-item-warning list-group-item-action" target="_blank">
+    Kocka s prednjim i stražnjim materijalom 
+  </a>
+  <a href="kocka10.html" class="list-group-item list-group-item-warning list-group-item-action" target="_blank">
+    Kocka s obojanim prednjim i stražnjim materijalom
+  </a>
+  <a href="kocka11.html" class="list-group-item list-group-item-warning list-group-item-action" target="_blank">
+    Kocka i reflektor
+  </a>
+  </div>
+
+   <div class="list-group" style="margin-bottom:50px;">
+  <li class="list-group-item active"><b>Napredniji primjeri</b></li>
+  <a href="analogni_sat.html" class="list-group-item list-group-item-warning list-group-item-action" target="_blank">
+    Analogni sat
+  </a>
+  <a href="globus.html" class="list-group-item list-group-item-warning list-group-item-action" target="_blank">
+    Globus
+  </a>
+  <a href="plazma3D.html" class="list-group-item list-group-item-warning list-group-item-action" target="_blank">
+    Plazma 3D
+  </a>
+  <a href="tetraedar_sierpinskog.html" class="list-group-item list-group-item-warning list-group-item-action" target="_blank">
+    Tetraedar Sierpinskog
+  </a>
+  <a href="mengerova_spuzva.html" class="list-group-item list-group-item-warning list-group-item-action" target="_blank">
+    Mengerova spužva
+  </a>
+  <a href="fraktalno_drvo.html" class="list-group-item list-group-item-warning list-group-item-action" target="_blank">
+    Fraktalno drvo
+  </a>
+  <a href="vjetrenjaca.html" class="list-group-item list-group-item-warning list-group-item-action" target="_blank">
+    Vjetrenjača
+  </a>
+  </div>
+
+</div>
+
+<script>
+$(document).ready(function() {
+  $( ".card" ).hover(
+  function() {
+    $(this).addClass('shadow-lg');
+  }, function() {
+    $(this).removeClass('shadow-lg');
+  }
+);
+});
+</script>
+  
+</body>
+</html>

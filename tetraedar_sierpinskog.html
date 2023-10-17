@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+
+<html>
+
+    <head>
+
+        <style>
+          html, body {margin: 0; width: 100%; height: 100%; overflow: hidden;}
+          canvas {width: 100%; height: 100%;}
+        </style>
+
+        <meta charset="utf-8">
+        <title>tetraedar</title>
+
+        
+        <link rel="stylesheet" type="text/css" href="skripte/jquery-ui.css">
+        <link rel="stylesheet" type="text/css" href="skripte/info.css"/>
+        <script src="skripte/MT3D.js"></script>
+        <script src="skripte/jquery-2.1.3.min.js"></script>
+        <script src="skripte/jquery-ui.js"></script>
+        <script src="skripte/WebGL.js"></script>
+
+        <script language="JavaScript">
+
+        window.onload = WEBGLapp;
+
+        function WEBGLapp() {
+            var kan = document.getElementById("kan");
+
+            //dubina rekurzije, maksimalno do 8
+            var DUBINA = 3;
+
+            var SQRT3 = Math.sqrt(3);
+            var SQRT6 = Math.sqrt(6);
+
+            //rotiranje oko z-osi
+            var theta = 85;
+            //kamera
+            var z_kamera = 2;
+            var zoom = 7;
+
+            //animacija
+            var animacija = false;
+            var now, old = Date.now();
+
+            //pocetni vrhovi tetraedra
+            var a = 3;
+            var v1 = [a / 2, -a * SQRT3 / 6, 0];
+            var v2 = [0, a * SQRT3 / 3, 0];
+            var v3 = [-a / 2, -a * SQRT3 / 6, 0];
+            var v4 = [0, 0, a * SQRT6 / 3];
+
+            var vrhovi = [];
+            var normale = [];
+            tetraedar(DUBINA,v1,v2,v3,v4);
+
+            //bufferi
+            var vrhoviBuffer, normaleBuffer;
+            var uMatriceBuffer, uSvjetloMaterijalBuffer;
+
+            //vertex array object
+            var vao;
+
+            var mat = new MT3D();
+            //mat.postaviKameru(-10,10, 10, 0, 0, 0, 0, 0, 1);
+            mat.postaviKameru(zoom * Math.cos(Math.PI/180 * theta) , zoom * Math.sin(Math.PI/180 * theta), z_kamera, 0,0,0, 0,0,1);
+
+            var transformacije = [];
+            transformacije.push(...mat.poljeModel(), ...mat.poljeMatrica(), ...mat.poljeNormalaBuffer());
+
+            var gl = null, program = null;
+
+            var svjetlo_materijal = [];
+            svjetlo_materijal.push(...mat.kamera_slika_tocke([35,30,15, 1]), //pozicija (svjetlo), byte offset: 0 
+                                   1,1,1,0, //ambient (svjetlo), byte offset: 16
+                                   1,1,1,0, //diffuse (svjetlo), byte offset: 32
+                                   1,0,1,0, //specular (svjetlo), byte offset: 48
+                                   0.5,0.5,0.5,0, //ambient_materijal, byte offset: 64
+                                   0.9,0.9,0.9,0, //diffuse_materijal, byte offset: 80
+                                   0.2,0.2,0.2,0, //specular_materijal, byte offset: 96
+                                   75/255,55/255,35/255,60, //emissive i shininess_materijal, byte offset: 112
+                                   26/255,26/255,3/255,0); //globalni ambijent, byte offset: 128
+
+            function initBuffers() {
+              vrhoviBuffer = gl.createBuffer();
+              normaleBuffer = gl.createBuffer();
+              uMatriceBuffer = gl.createBuffer();
+              uSvjetloMaterijalBuffer = gl.createBuffer();
+              vao = gl.createVertexArray();
+
+              gl.bindBuffer(gl.UNIFORM_BUFFER, uMatriceBuffer);
+              gl.bufferData(gl.UNIFORM_BUFFER, new Float32Array(transformacije), gl.DYNAMIC_DRAW);
+              gl.bindBuffer(gl.UNIFORM_BUFFER, null);
+
+              gl.bindBuffer(gl.UNIFORM_BUFFER, uSvjetloMaterijalBuffer);
+              gl.bufferData(gl.UNIFORM_BUFFER, new Float32Array(svjetlo_materijal), gl.STATIC_DRAW); //nece se precesto mijenjati buffer
+              gl.bindBuffer(gl.UNIFORM_BUFFER, null);
+
+              gl.bindBufferBase(gl.UNIFORM_BUFFER, 0, uMatriceBuffer);
+              gl.bindBufferBase(gl.UNIFORM_BUFFER, 1, uSvjetloMaterijalBuffer);
+
+              gl.bindVertexArray(vao);
+              gl.enableVertexAttribArray(program.a_position);
+              gl.enableVertexAttribArray(program.a_normala);
+
+              gl.bindBuffer(gl.ARRAY_BUFFER, vrhoviBuffer);
+              //na dubini D je ukupno 3*4**(D+1) vrhova
+              //zajedno ukupno 9*4**(D+1) realnih brojeva
+              //za svaki od njih u jednostrukoj preciznosti treba 4 bajta
+              //trebamo spremnik od 9*4**(D+2) bajta, D=8 -> 9437184
+              gl.bufferData(gl.ARRAY_BUFFER, 9437184, gl.DYNAMIC_DRAW);
+              gl.vertexAttribPointer(program.a_position, 3, gl.FLOAT, false, 0, 0);
+              gl.bufferSubData(gl.ARRAY_BUFFER, 0, new Float32Array(vrhovi));
+              gl.bindBuffer(gl.ARRAY_BUFFER, null);
+              
+              gl.bindBuffer(gl.ARRAY_BUFFER, normaleBuffer);
+              //na dubini D je ukupno 3*4**(D+1) vrhova
+              //zajedno ukupno 9*4**(D+1) realnih brojeva
+              //za svaki od njih u jednostrukoj preciznosti treba 4 bajta
+              //trebamo spremnik od 9*4**(D+2) bajta, D=8 -> 9437184
+              gl.bufferData(gl.ARRAY_BUFFER, 9437184, gl.DYNAMIC_DRAW);
+              gl.vertexAttribPointer(program.a_normala, 3, gl.FLOAT, false, 0, 0);
+              gl.bufferSubData(gl.ARRAY_BUFFER, 0, new Float32Array(normale));
+              gl.bindBuffer(gl.ARRAY_BUFFER, null);
+
+              gl.bindVertexArray(null);
+            }
+
+            function normala_fun(v1,v2,v3) {
+              var a1 = [v2[0] - v1[0], v2[1] - v1[1], v2[2] - v1[2]];
+              var a2 = [v3[0] - v1[0], v3[1] - v1[1], v3[2] - v1[2]];
+              var n = [a1[1] * a2[2] - a1[2] * a2[1],
+                       a1[2] * a2[0] - a1[0] * a2[2],
+                       a1[0] * a2[1] - a1[1] * a2[0]];
+              var br = Math.sqrt(n.reduce((a,b) => a + b * b, 0));
+              n = n.map(x => x / br);
+              return n;
+            }
+
+            function tetraedar(dubina, v1, v2, v3, v4) {
+              if (dubina > 0) {
+                var v12 = [0,0,0], v13 = [0,0,0], v14 = [0,0,0];
+                var v23 = [0,0,0], v24 = [0,0,0], v34 = [0,0,0];
+
+                v12[0] = (v1[0] + v2[0]) / 2.0;
+                v12[1] = (v1[1] + v2[1]) / 2.0;
+                v12[2] = (v1[2] + v2[2]) / 2.0;
+
+                v13[0] = (v1[0] + v3[0]) / 2.0;
+                v13[1] = (v1[1] + v3[1]) / 2.0;
+                v13[2] = (v1[2] + v3[2]) / 2.0;
+
+                v14[0] = (v1[0] + v4[0]) / 2.0;
+                v14[1] = (v1[1] + v4[1]) / 2.0;
+                v14[2] = (v1[2] + v4[2]) / 2.0;
+
+                v23[0] = (v2[0] + v3[0]) / 2.0;
+                v23[1] = (v2[1] + v3[1]) / 2.0;
+                v23[2] = (v2[2] + v3[2]) / 2.0;
+
+                v24[0] = (v2[0] + v4[0]) / 2.0;
+                v24[1] = (v2[1] + v4[1]) / 2.0;
+                v24[2] = (v2[2] + v4[2]) / 2.0;
+
+                v34[0] = (v3[0] + v4[0]) / 2.0;
+                v34[1] = (v3[1] + v4[1]) / 2.0;
+                v34[2] = (v3[2] + v4[2]) / 2.0;
+
+                tetraedar(dubina - 1, v1, v12, v13, v14);
+                tetraedar(dubina - 1, v12, v2, v23, v24);
+                tetraedar(dubina - 1, v23, v3, v13, v34);
+                tetraedar(dubina - 1, v14, v24, v34, v4);
+              } else {
+                vrhovi.push(...v1,...v3,...v2,
+                            ...v1,...v2,...v4,
+                            ...v2,...v3,...v4,
+                            ...v1,...v4,...v3);
+                var nor1 = normala_fun(v1,v3,v2);
+                var nor2 = normala_fun(v1,v2,v4);
+                var nor3 = normala_fun(v2,v3,v4);
+                var nor4 = normala_fun(v1,v4,v3);
+                normale.push(...nor1,...nor1,...nor1,
+                             ...nor2,...nor2,...nor2,
+                             ...nor3,...nor3,...nor3,
+                             ...nor4,...nor4,...nor4);
+              }
+            }
+
+            function drawScene() {
+              gl.clearColor(0,0,0,1);
+              gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+              gl.viewport(0, 0, kan.width, kan.height);
+
+              gl.bindVertexArray(vao);
+
+              mat.identitet();
+              mat.Perspektiva(35, kan.width/kan.height, 0.2, 50);
+              mat.postaviKameru(zoom * Math.cos(Math.PI/180 * theta) , zoom * Math.sin(Math.PI/180 * theta), z_kamera, 0,0,0.01*zoom, 0,0,1);
+              mat.pomakni(0,0,-0.9);
+              
+              transformacije.splice(0,48, ...mat.poljeModel(), ...mat.poljeMatrica(), ...mat.poljeNormalaBuffer());
+              gl.bindBuffer(gl.UNIFORM_BUFFER, uMatriceBuffer);
+              gl.bufferSubData(gl.UNIFORM_BUFFER, 0, new Float32Array(transformacije));
+              gl.bindBuffer(gl.UNIFORM_BUFFER, null);
+
+              gl.drawArrays(gl.TRIANGLES, 0, 3*4**(DUBINA+1));
+            }
+
+            function WebGL_aplikacija() {
+              gl = kan.getContext("webgl2");
+              if (!gl) alert("WEBGL2 nije dostupan!");
+              program = napraviProgram(gl, "vertex-shader", "fragment-shader");
+              gl.useProgram(program);
+
+              program.a_position = gl.getAttribLocation(program, "a_position");
+              program.a_normala = gl.getAttribLocation(program, "a_normala");
+              program.Matrice = gl.getUniformBlockIndex(program, "Matrice");
+              program.SvjetloMaterijal = gl.getUniformBlockIndex(program, "SvjetloMaterijal");
+
+              gl.uniformBlockBinding(program, program.Matrice, 0);
+              gl.uniformBlockBinding(program, program.SvjetloMaterijal, 1);
+
+              gl.enable(gl.DEPTH_TEST);
+              gl.enable(gl.CULL_FACE);
+
+              kan.width = kan.width;
+              kan.height = kan.height;
+
+              initBuffers();
+              drawScene();
+            }
+
+            function okretanje_tetraedra() {
+              if (animacija) {
+                requestAnimationFrame(okretanje_tetraedra);
+                now = Date.now();
+                theta += (now - old) * 0.025; //svakih 40 milisekundi promijeni kut za 1 stupanj
+                if (theta >= 360) theta = theta - 360;
+                old = now;
+                drawScene();
+              }
+            }
+
+            WebGL_aplikacija();
+            resizeCanvas();//resize canvas prilikom pokretanja stranice
+
+            function resizeCanvas() {
+              var displayWidth  = kan.clientWidth;
+              var displayHeight  = kan.clientHeight;
+              if (kan.width != displayWidth ||  kan.height != displayHeight) {
+                kan.width  = displayWidth;
+                kan.height = displayHeight;
+                drawScene();
+              }
+            }
+
+            $(window).resize(resizeCanvas); //resize canvas prilikom svake promjene dimenzija prozora preglednika
+
+            $(window).keydown( function(e) {
+                  e.preventDefault();
+                   switch (e.key)
+                   {
+                      case 'ArrowDown':
+                      if (DUBINA > 0 && !animacija) {
+                        DUBINA -= 1;
+                        vrhovi.length = 0;
+                        normale.length = 0;
+                        tetraedar(DUBINA,v1,v2,v3,v4);
+                        gl.bindBuffer(gl.ARRAY_BUFFER, vrhoviBuffer);
+                        gl.bufferSubData(gl.ARRAY_BUFFER, 0, new Float32Array(vrhovi));
+                        gl.bindBuffer(gl.ARRAY_BUFFER, null);
+                        gl.bindBuffer(gl.ARRAY_BUFFER, normaleBuffer);
+                        gl.bufferSubData(gl.ARRAY_BUFFER, 0, new Float32Array(normale));
+                        gl.bindBuffer(gl.ARRAY_BUFFER, null);
+                        $('#dubina_rekurzije').html('&nbsp;'+DUBINA+'&nbsp;');
+                        drawScene();
+                      }
+                      break;
+
+                      case 'ArrowUp':
+                      if (DUBINA < 8 && !animacija) {
+                        DUBINA += 1;
+                        vrhovi.length = 0;
+                        normale.length = 0;
+                        tetraedar(DUBINA,v1,v2,v3,v4);
+                        gl.bindBuffer(gl.ARRAY_BUFFER, vrhoviBuffer);
+                        gl.bufferSubData(gl.ARRAY_BUFFER, 0, new Float32Array(vrhovi));
+                        gl.bindBuffer(gl.ARRAY_BUFFER, null);
+                        gl.bindBuffer(gl.ARRAY_BUFFER, normaleBuffer);
+                        gl.bufferSubData(gl.ARRAY_BUFFER, 0, new Float32Array(normale));
+                        gl.bindBuffer(gl.ARRAY_BUFFER, null);
+                        $('#dubina_rekurzije').html('&nbsp;'+DUBINA+'&nbsp;');
+                        drawScene();
+                      }
+                      break;
+
+                      case 'a':
+                      if (animacija) animacija = false;
+                      else {
+                        animacija = true;
+                        old = Date.now();
+                        okretanje_tetraedra();
+                      }
+                      break;
+                   }
+                });
+
+
+            $(window).contextmenu( function() { return false; }); //disable right click meni
+
+            var leftDown = false;
+            var rightDown = false;
+            var middleDown = false;
+            var lastMouseX = null;
+            var lastMouseY = null;
+
+            $(window).mousedown(function(event) {
+              switch (event.which) {
+                case 1:
+                leftDown = true;
+                lastMouseX = event.clientX;
+                break;
+
+                case 2:
+                middleDown = true;
+                lastMouseY = event.clientY;
+                break;
+
+                case 3:
+                rightDown = true;
+                lastMouseY = event.clientY;
+                break;
+              } });
+
+            $(window).mouseup(function(event) {
+                switch (event.which) {
+                  case 1:
+                  leftDown = false;
+                  break;
+
+                  case 2:
+                  middleDown = false;
+                  break;
+
+                  case 3:
+                  rightDown = false;
+                  break;
+                } });
+
+            $(window).mousemove(function(event) {
+              if (leftDown && !animacija) {
+                var newX = event.clientX;
+                var dTheta = 0.125 * (newX - lastMouseX);
+                theta += dTheta;
+                if (theta > 360) theta = theta - 360;
+                if (theta < 0) theta = theta + 360;
+                lastMouseX = newX;
+                drawScene();
+              }
+              if (rightDown) {
+                var newY = event.clientY;
+                var dz = 0.05 * (newY - lastMouseY);
+                z_kamera += dz;
+                if (z_kamera > 4) z_kamera = 4;
+                if (z_kamera < -2) z_kamera = -2;
+                lastMouseY = newY;
+                drawScene();
+              }
+              if (middleDown) {
+              var newY = event.clientY;
+              var dz = 0.05 * (newY - lastMouseY);
+              zoom += dz;
+              if (zoom > 8) zoom = 8;
+              if (zoom < 2) zoom = 2;
+              lastMouseY = newY;
+              drawScene();  
+              }
+            });
+        }
+        </script>
+
+        <script id="vertex-shader" type="x-shader/x-vertex">
+         #version 300 es
+         in vec3 a_position;
+         in vec3 a_normala;
+
+         layout(std140) uniform Matrice {
+             mat4 u_matricaModel;
+             mat4 u_matricaProjekcija;
+             mat3 u_matricaNormala;
+          };
+
+         out vec3 v_normala;
+         out vec3 v_vrh;
+         out vec3 v_koordinate;
+
+         void main(void) {
+           //transformiraj vrh
+           vec4 vrh = u_matricaModel * vec4(a_position, 1.0);
+           //transformiraj normalu
+           v_normala = normalize(u_matricaNormala * a_normala);
+           //vec3 N = a_normala;
+
+           v_vrh = vrh.xyz;
+           v_koordinate = a_position;
+           gl_Position = u_matricaProjekcija * vec4(a_position, 1.0);
+         }
+        </script>
+
+        <script id="fragment-shader" type="x-shader/x-fragment">
+          #version 300 es
+          precision highp float;
+
+          struct svojstvaSvjetla {
+            vec4 position; //ako je w=0, onda se radi o usmjerenom svjetlu; inace je w = 1
+            vec3 ambient;
+            vec3 diffuse;
+            vec3 specular;
+          };
+
+          struct svojstvaMaterijala {
+            vec3 ambient;
+            vec3 diffuse;
+            vec3 specular;
+            vec3 emissive;
+            float shininess;
+          };
+
+          layout(std140) uniform SvjetloMaterijal {
+             svojstvaSvjetla u_svjetlo;
+             svojstvaMaterijala u_materijal;
+             vec3 u_globalniAmbijent;
+          };
+
+          in vec3 v_normala;
+          in vec3 v_vrh;
+          in vec3 v_koordinate;
+          out vec4 outColor;
+
+          void main(void)  {
+            vec3 boja;
+            vec3 L;
+
+            //transformiraj poziciju svjetla
+            vec4 light_pos =  u_svjetlo.position;
+            if (light_pos.w == 0.0) L = normalize(light_pos.xyz);
+            else L = normalize(light_pos.xyz - v_vrh);
+            //Lambertov faktor
+            float Lambert = dot(v_normala, L);
+            //ambijentalna komponenta
+            vec3 Ia = u_svjetlo.ambient * u_materijal.ambient;
+            //difuzna komponenta
+            vec3 Id = vec3(0.0, 0.0, 0.0);
+            //zrcalna komponenta
+            vec3 Is = vec3(0.0, 0.0, 0.0);
+
+            if (Lambert > 0.0) {
+              Id = u_svjetlo.diffuse * u_materijal.diffuse * Lambert;
+              vec3 V = normalize(-v_vrh);
+              vec3 R = reflect(-L, v_normala);
+              float Spec = pow(max(dot(R, V), 0.0), u_materijal.shininess);
+              Is = u_svjetlo.specular * u_materijal.specular * Spec;
+            }
+
+            float k = abs(sin(20.8*(pow(pow(abs(v_koordinate.x),3.0) + pow(abs(v_koordinate.y),3.0),0.2))));
+            if (k < 0.5) k = 1.0-k;
+            boja = u_globalniAmbijent * u_materijal.ambient + (Ia + Id) * vec3(0.8*k, 0.8*k, 0.3) + Is + u_materijal.emissive;
+
+            outColor = vec4(boja, 1.0);
+          }
+        </script>
+
+    </head>
+
+    <body>
+      <script src="skripte/info.js"></script>
+      <div id="infoButton"></div>
+      <div id="infoBox" title="Help">
+
+              <p>Ovaj help možete zatvoriti i ponovo ga otvoriti klikom na <i>info</i> ikonu u gornjem lijevom kutu.</p>
+              <p><b>Tastatura</b></p>
+              <ul style="margin-left: -20px;">
+              <li style="margin-bottom: 5px;">Tipke &#8679; i &#8681; mijenjaju dubinu rekurzije: <span style="color:white; font-weight: bold; background-color: blue; font-size:14px;" id="dubina_rekurzije">&nbsp;3&nbsp;</span></li>
+              <li style="margin-bottom: 5px;">Tipka <code>A</code>: pokretanje i zaustavljanje animacije.<br style="line-height:20px;"> Ako je animacija aktivna, onemogućeno je mijenjanje dubine rekurzije i korištenje lijeve tipke miša.</li>
+              </ul>
+              <p><b>Miš</b></p>
+              <ul style="margin-left: -20px;">
+                <li style="margin-bottom: 5px;">Pritisnuta lijeva tipka miša + micanje miša lijevo/desno: rotiranje kamere oko objekta</li>
+                <li style="margin-bottom: 5px;">Pritisnuta desna tipka miša + micanje miša gore/dolje: spuštanje i podizanje kamere pri čemu se točka prema kojoj kamera gleda ne mijenja.</li>
+                <li style="margin-bottom: 5px;">Pritisnuta srednja tipka miša + micanje miša gore/dolje: približavanje i udaljavanje od objekta</li>
+              </ul>
+        </div>
+
+      <canvas id="kan">
+          Your browser does not support HTML5 canvas.
+      </canvas>
+    </body>
+
+</html>

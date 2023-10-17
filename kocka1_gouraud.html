@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+
+<html>
+
+    <head>
+
+        <meta charset="utf-8">
+        <title>kocka1</title>
+
+        <script src="skripte/MT3D.js"></script>
+        <script src="skripte/WebGL.js"></script>
+
+        <script language="JavaScript">
+
+        window.onload = WEBGLapp;
+
+       function WEBGLapp() {
+            var kan = document.getElementById("kan");
+            //duljina stranice kocke
+            var a = 8;
+            //definiranje geometrije preko javascript polja
+            var vrhovi = [a,0,a, a,0,0, a,a,0, a,0,a, a,a,0, a,a,a, //prednja strana za TRIANGLES
+                          0,0,a, 0,a,0, 0,0,0, 0,0,a, 0,a,a, 0,a,0, //straznja strana za TRIANGLES
+                          a,0,0, a,0,a, 0,0,0, a,0,a, 0,0,a, 0,0,0, //lijeva strana za TRIANGLES
+                          a,a,0, 0,a,0, a,a,a, a,a,a, 0,a,0, 0,a,a, //desna strana za TRIANGLES
+                          0,0,a, a,0,a, a,a,a, 0,0,a, a,a,a, 0,a,a, // gornja strana za TRIANGLES
+                          0,0,0, a,a,0, a,0,0, 0,0,0, 0,a,0, a,a,0]; //donja strana za TRIANGLES
+            var normale = [1,0,0, 1,0,0, 1,0,0, 1,0,0, 1,0,0, 1,0,0, //prednja strana
+                           -1,0,0, -1,0,0, -1,0,0, -1,0,0, -1,0,0, -1,0,0, //straznja strana
+                           0,-1,0, 0,-1,0, 0,-1,0, 0,-1,0, 0,-1,0, 0,-1,0, //lijeva strana
+                           0,1,0, 0,1,0, 0,1,0, 0,1,0, 0,1,0, 0,1,0, //desna strana
+                           0,0,1, 0,0,1, 0,0,1, 0,0,1, 0,0,1, 0,0,1, //gornja strana
+                           0,0,-1, 0,0,-1, 0,0,-1, 0,0,-1, 0,0,-1, 0,0,-1]; //donja strana
+
+            //bufferi
+            var vrhoviBuffer, normaleBuffer;
+
+            //vertex array object
+            var vao;
+
+            //kut rotacije
+            var kut = 0;
+            var old = 0;
+
+            var mat = new MT3D();
+
+            var gl = null, program = null;
+
+            var kan_width, kan_height; //dimenzije canvasa
+
+            var globalniAmbijent = [0.2,0.3,0];
+
+            var transformacije = [];
+            transformacije.push(...mat.poljeModel(), ...mat.poljeMatrica(), ...mat.poljeNormalaBuffer());
+
+            var svjetlo_materijal = [];
+            svjetlo_materijal.push(-20,10,50,1, //pozicija svjetla, 4. komponenta je vrsta svjetla: 0 - usmjereno svjetlo, 1 - pozicijsko svjetlo 
+                                   1,1,0,0, //ambient svjetlo
+                                   1,1,1,0, //diffuse svjetlo
+                                   1,1,1,0, //specular svjetlo
+                                   26/255,26/255,51/255,0, //ambient materijal
+                                   0.05,0.95,0,0, //diffuse materijal
+                                   0.7,0.7,0.7,0, //specular materijal
+                                   0.2,0.2,0,20); //emissive i shininess materijal 
+
+            function initBuffers() {
+              vrhoviBuffer = gl.createBuffer();
+              normaleBuffer = gl.createBuffer();
+              uMatriceBuffer = gl.createBuffer(); 
+              uSvjetloMaterijalBuffer = gl.createBuffer();
+              vao = gl.createVertexArray();
+
+              gl.bindBuffer(gl.UNIFORM_BUFFER, uMatriceBuffer);
+              gl.bufferData(gl.UNIFORM_BUFFER, new Float32Array(transformacije), gl.DYNAMIC_DRAW);
+
+              gl.bindBuffer(gl.UNIFORM_BUFFER, uSvjetloMaterijalBuffer);
+              gl.bufferData(gl.UNIFORM_BUFFER, new Float32Array(svjetlo_materijal), gl.STATIC_DRAW);
+              gl.bindBuffer(gl.UNIFORM_BUFFER, null);
+
+              gl.bindBufferBase(gl.UNIFORM_BUFFER, 0, uMatriceBuffer);
+              gl.bindBufferBase(gl.UNIFORM_BUFFER, 1, uSvjetloMaterijalBuffer);
+
+              gl.bindVertexArray(vao);
+              gl.enableVertexAttribArray(0);
+              gl.enableVertexAttribArray(1);
+
+              gl.bindBuffer(gl.ARRAY_BUFFER, vrhoviBuffer);
+              gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+              gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vrhovi), gl.STATIC_DRAW);
+              gl.bindBuffer(gl.ARRAY_BUFFER, null);
+
+              gl.bindBuffer(gl.ARRAY_BUFFER, normaleBuffer);
+              gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 0, 0);
+              gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(normale), gl.STATIC_DRAW);
+              gl.bindBuffer(gl.ARRAY_BUFFER, null);
+
+              gl.bindVertexArray(null);
+            }
+
+          function drawScene() {
+              gl.clearColor(0.5, 0.5, 0.5, 1);
+              gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+              gl.viewport(0, 0, kan_width, kan_height);
+
+              mat.identitet();
+              mat.PerspektivnaProjekcijaX(-3, 3, -3, 3, 6, 40, kan_width, kan_height);
+              mat.postaviKameru(5, 15, 8, 0, 0, 0, 0, 0, 1);
+              mat.rotirajZ(kut);
+              mat.pomakni(-4,-4,-4); // -a/2
+
+              transformacije.splice(0,48,...mat.poljeModel(), ...mat.poljeMatrica(), ...mat.poljeNormalaBuffer());
+              gl.bindBuffer(gl.UNIFORM_BUFFER, uMatriceBuffer);
+              gl.bufferSubData(gl.UNIFORM_BUFFER, 0, new Float32Array(transformacije));
+
+              gl.bindVertexArray(vao);
+              gl.drawArrays(gl.TRIANGLES, 0, 36);
+            }
+
+            function WebGL_aplikacija() {
+              gl = kan.getContext("webgl2");
+              if (!gl) alert("WEBGL2 nije dostupan!");
+              program = napraviProgram(gl, "vertex-shader", "fragment-shader");
+              gl.useProgram(program);
+
+              gl.enable(gl.DEPTH_TEST);
+              gl.enable(gl.CULL_FACE);
+              //gl.cullFace(gl.BACK); //default
+
+              program.Matrice = gl.getUniformBlockIndex(program, "Matrice");
+              program.SvjetloMaterijal = gl.getUniformBlockIndex(program, "SvjetloMaterijal");
+              program.u_globalniAmbijent = gl.getUniformLocation(program, "u_globalniAmbijent");
+
+              gl.uniformBlockBinding(program, program.Matrice, 0);
+              gl.uniformBlockBinding(program, program.SvjetloMaterijal, 1);
+
+              kan_width = kan.width;
+              kan_height = kan.height;
+
+              initBuffers();
+              gl.uniform3fv(program.u_globalniAmbijent, globalniAmbijent);
+            }
+
+            function animacija(now) {
+              requestAnimationFrame(animacija);
+              now *= 0.001;
+              var delta = now - old;
+              old = now;
+              kut += (30*delta) % 360;
+              drawScene();
+            }
+
+            WebGL_aplikacija();
+            animacija(0);
+
+        }
+        </script>
+
+        <script id="vertex-shader" type="x-shader/x-vertex">
+          #version 300 es
+          struct svojstvaSvjetla {
+            vec4 position; //ako je w=0, onda se radi o usmjerenom svjetlu; inace je w = 1
+            vec3 ambient;
+            vec3 diffuse;
+            vec3 specular;
+          };
+
+          struct svojstvaMaterijala {
+            vec3 ambient;
+            vec3 diffuse;
+            vec3 specular;
+            vec3 emissive;
+            float shininess;
+          };
+
+          layout(location = 0) in vec3 a_position;
+          layout(location = 1) in vec3 a_normala;
+
+          layout(std140) uniform Matrice {
+             mat4 u_matricaModel;
+             mat4 u_matricaProjekcija;
+             mat3 u_matricaNormala;
+          };
+
+          layout(std140) uniform SvjetloMaterijal {
+             svojstvaSvjetla u_svjetlo;
+             svojstvaMaterijala u_materijal;
+          };
+
+          uniform vec3 u_globalniAmbijent; //ambijentalno svjetlo koje postoji i kada su svi izvori svjetla iskljuceni
+
+          out vec3 v_boja;
+
+          void main(void) {
+            //transformiraj vrh
+            vec4 vrh = u_matricaModel * vec4(a_position, 1.0);
+            //transformiraj normalu
+            vec3 N = normalize(u_matricaNormala * a_normala);
+            //normirani vektor smjera svjetla i suprotne orijentacije
+            vec3 L;
+            if (u_svjetlo.position.w == 0.0) L = normalize(u_svjetlo.position.xyz);
+            else L = normalize(u_svjetlo.position.xyz - vrh.xyz);
+            //Lambertov faktor
+            float Lambert = dot(N,L);
+            //ambijentalna komponenta
+            vec3 Ia = u_svjetlo.ambient * u_materijal.ambient;
+            //difuzna komponenta
+            vec3 Id = vec3(0.0, 0.0, 0.0);
+            //zrcalna komponenta
+            vec3 Is = vec3(0.0, 0.0, 0.0);
+            if (Lambert > 0.0) {
+              Id = u_svjetlo.diffuse * u_materijal.diffuse * Lambert;
+              vec3 V = normalize(-vrh.xyz);
+              vec3 R = reflect(-L, N);
+              float Spec = pow(max(dot(R, V), 0.0), u_materijal.shininess);
+              Is = u_svjetlo.specular * u_materijal.specular * Spec;
+            }
+            v_boja = u_globalniAmbijent * u_materijal.ambient + Ia + Id + Is + u_materijal.emissive;
+            gl_Position = u_matricaProjekcija * vec4(a_position, 1.0);
+          }
+        </script>
+
+        <script id="fragment-shader" type="x-shader/x-fragment">
+            #version 300 es
+            precision mediump float;
+            in vec3 v_boja;
+            out vec4 outColor;
+
+            void main() {
+              outColor = vec4(v_boja,1);
+            }
+        </script>
+
+    </head>
+
+    <body>
+        <h1>Kocka 1 - Gouraud shading</h1>
+        <canvas id="kan" width="500" tabindex="0" height="500" style="border:5px solid black">
+        Your browser does not support HTML5 canvas.
+        </canvas>
+        <ul>
+          <li>Kocka u perspektivnoj projekciji.</li>
+          <li>Osvjetljenje se računa u vertex shaderu, a boja se prenosi u fragment shader.</li>
+          <li>U svakom vrhu su tri normale. Normala svakog vrha je okomita na pripadni trokut kojeg taj vrh određuje.</li>
+          <li>Kamera miruje, a na objekt primjenjujemo transformacije.</li>
+          <li>Izvor svjetlosti miruje.</li>
+        </ul>
+    </body>
+
+</html>

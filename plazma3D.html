@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+
+<html>
+
+    <head>
+
+        <style>
+          html, body {margin: 0; width: 100%; height: 100%; overflow: hidden;}
+          canvas {width: 100%; height: 100%;}
+        </style>
+
+        <meta charset="utf-8">
+        <title>3D plazma</title>
+
+        
+        <link rel="stylesheet" type="text/css" href="skripte/jquery-ui.css">
+        <link rel="stylesheet" type="text/css" href="skripte/info.css"/>
+        <script src="skripte/MT3D.js"></script>
+        <script src="skripte/jquery-2.1.3.min.js"></script>
+        <script src="skripte/jquery-ui.js"></script>
+        <script src="skripte/WebGL.js"></script>
+
+        <script language="JavaScript">
+
+        window.onload = WEBGLapp;
+
+        function WEBGLapp() {
+            var kan = document.getElementById("kan");
+
+            var tex_width = 128, tex_height = 128; //dimenzija matrice plazme
+            //faktor skaliranja
+            var FAC = 0.15;
+
+            //matrica u koju se spremaju z-koordinate
+            var listaZ = new Array(tex_width+1).fill(0).map(() => new Array(tex_height+1).fill(0));
+            listaZ[0][0] = -1;
+            listaZ[tex_width][0] = 1;
+            listaZ[tex_width][tex_height] = -1;
+            listaZ[0][tex_height] = 1;
+
+            //Box-Muller algoritam, spremljeni broj
+            var CACHED_NUMBER;
+            var CACHED_FULL = false;
+
+            //dubina rekurzije
+            var DUBINA = 9;
+
+            //rotiranje oko z-osi
+            var theta = 45;
+            //kamera
+            var z_kamera = 50;
+            var zoom = 150;
+
+            //kreiranje plazme
+            plazma(DUBINA, 0, tex_width, 0, tex_height);
+
+            //min max vrijednosti plazme
+            var plazma_max = Math.max(...listaZ.map(x => Math.max(...x)));
+            var plazma_min = Math.min(...listaZ.map(x => Math.min(...x)));
+
+            var vrhovi = [];
+            var normale = [];
+            var indeksi = [];
+            var d1 = listaZ[0].length - 1;
+            var d2 = listaZ.length - 1;
+            var nor;
+
+            for (var i = 0; i < listaZ.length; i++) {
+              for (var j = 0; j < listaZ[0].length; j++) {
+                vrhovi.push(i,j,listaZ[i][j]);
+                nor = normala_fun(i,j,d1,d2);
+                normale.push(nor[0],nor[1],nor[2]);
+              }
+            }
+
+            for (var i = 0; i < tex_height; i++) {
+              for (var j = 0; j <= tex_width; j++) {
+                indeksi.push(j+(tex_width+1)*(i+1),j+(tex_width+1)*i);
+              }
+              if (i < tex_height-1) indeksi.push(indeksi[indeksi.length-1],indeksi[indeksi.length-2]+1);
+            }
+
+            //bufferi
+            var vrhoviBuffer, normaleBuffer, indeksiBuffer;
+            var uMatriceBuffer, uSvjetloMaterijalBuffer;
+
+            //vertex array object
+            var vao;
+
+            var mat = new MT3D();
+            mat.postaviKameru(10,10, 10, 0, 0, 0, 0, 0, 1);
+
+            var transformacije = [];
+            transformacije.push(...mat.poljeModel(), ...mat.poljeMatrica(), ...mat.poljeNormalaBuffer());
+
+            var gl = null, program = null;
+
+            var svjetlo_materijal = [];
+            svjetlo_materijal.push(...mat.kamera_slika_tocke([-60,100,200, 1]), //pozicija (svjetlo), byte offset: 0 
+                                   1,1,1,0, //ambient (svjetlo), byte offset: 16
+                                   1,1,1,0, //diffuse (svjetlo), byte offset: 32
+                                   1,1,1,0, //specular (svjetlo), byte offset: 48
+                                   26/255,26/255,51/255,0, //ambient front_materijal, byte offset: 64
+                                   218/255,165/255,32/255,0, //diffuse front_materijal, byte offset: 80
+                                   128/255,128/255,128/255,0, //specular front_materijal, byte offset: 96
+                                   15/255,11/255,15/255,60, //emissive i shininess front_materijal, byte offset: 112
+                                   0.1,0.1,0.2,0, //ambient back_materijal, byte offset: 128
+                                   72/255,69/255,139/255,0, //diffuse back_materijal, byte offset: 144
+                                   0.4,0.4,0.4,0, //specular back_materijal, byte offset: 160
+                                   0,0,0,30, //emissive i shininess back_materijal, byte offset: 176
+                                   26/255,3/255,3/255,0); //globalni ambijent, byte offset: 192
+
+            function initBuffers() {
+              vrhoviBuffer = gl.createBuffer();
+              normaleBuffer = gl.createBuffer();
+              indeksiBuffer = gl.createBuffer();
+              uMatriceBuffer = gl.createBuffer();
+              uSvjetloMaterijalBuffer = gl.createBuffer();
+              vao = gl.createVertexArray();
+
+              gl.bindBuffer(gl.UNIFORM_BUFFER, uMatriceBuffer);
+              gl.bufferData(gl.UNIFORM_BUFFER, new Float32Array(transformacije), gl.DYNAMIC_DRAW);
+              gl.bindBuffer(gl.UNIFORM_BUFFER, null);
+
+              gl.bindBuffer(gl.UNIFORM_BUFFER, uSvjetloMaterijalBuffer);
+              gl.bufferData(gl.UNIFORM_BUFFER, new Float32Array(svjetlo_materijal), gl.STATIC_DRAW); //nece se precesto mijenjati buffer
+              gl.bindBuffer(gl.UNIFORM_BUFFER, null);
+
+              gl.bindBufferBase(gl.UNIFORM_BUFFER, 0, uMatriceBuffer);
+              gl.bindBufferBase(gl.UNIFORM_BUFFER, 1, uSvjetloMaterijalBuffer);
+
+              gl.bindVertexArray(vao);
+              gl.enableVertexAttribArray(program.a_position);
+              gl.enableVertexAttribArray(program.a_normala);
+
+              gl.bindBuffer(gl.ARRAY_BUFFER, vrhoviBuffer);
+              //imamo ukupno 16641 vrhova
+              //zajedno ukupno 3*16641=49923 realnih brojeva
+              //za svaki od njih u jednostrukoj preciznosti treba 4 bajta
+              //trebamo spremnik od 4*49923 -> 199692 bajta
+              gl.bufferData(gl.ARRAY_BUFFER, 199692, gl.DYNAMIC_DRAW);
+              gl.vertexAttribPointer(program.a_position, 3, gl.FLOAT, false, 0, 0);
+              gl.bufferSubData(gl.ARRAY_BUFFER, 0, new Float32Array(vrhovi));
+              gl.bindBuffer(gl.ARRAY_BUFFER, null);
+              
+              gl.bindBuffer(gl.ARRAY_BUFFER, normaleBuffer);
+              //imamo ukupno 16641 vrhova
+              //zajedno ukupno 3*16641=49923 realnih brojeva
+              //za svaki od njih u jednostrukoj preciznosti treba 4 bajta
+              //trebamo spremnik od 4*49923 -> 199692 bajta
+              gl.bufferData(gl.ARRAY_BUFFER, 199692, gl.DYNAMIC_DRAW);
+              gl.vertexAttribPointer(program.a_normala, 3, gl.FLOAT, false, 0, 0);
+              gl.bufferSubData(gl.ARRAY_BUFFER, 0, new Float32Array(normale));
+              gl.bindBuffer(gl.ARRAY_BUFFER, null);
+
+              gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indeksiBuffer);
+              gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indeksi), gl.STATIC_DRAW);
+
+              gl.bindVertexArray(null);              
+            }
+
+            function gauss() {//Box-Muller algoritam
+              var u, v, prod;
+              var s = 5;
+              if (CACHED_FULL) {
+                CACHED_FULL = false;
+                return CACHED_NUMBER;
+              } else {
+                while ((s >= 1) || (s == 0)) {
+                  u = 2 * Math.random() - 1;
+                  v = 2 * Math.random() - 1;
+                  s = u**2 + v**2;
+                }
+                prod = Math.sqrt(-2 * Math.log(s) / s);
+                CACHED_NUMBER = u * prod;
+                CACHED_FULL = true;
+                return v * prod;
+              }
+            }
+
+            function normiraj(vektor) {
+              var br = Math.sqrt(vektor.reduce((a,b) => a + b * b, 0));
+              var nor_vek = vektor.map(x => x / br);
+              return nor_vek;
+            }
+
+            function normala_fun(k1,k2,k1max,k2max) {
+              var nor;
+              switch (true) {
+                case (k1 == 0) && (k2 == 0):
+                nor = normiraj([listaZ[k1][k2] - listaZ[k1+1][k2], listaZ[k1][k2] - listaZ[k1][k2+1], 1]);
+                break;
+
+                case (k1 == k1max) && (k2 == 0):
+                nor = normiraj([listaZ[k1-1][k2] - listaZ[k1][k2], listaZ[k1][k2] - listaZ[k1][k2+1], 1]);
+                break;
+
+                case (k1 == 0) && (k2 == k2max):
+                nor = normiraj([listaZ[k1][k2] - listaZ[k1+1][k2], listaZ[k1][k2-1] - listaZ[k1][k2], 1]);
+                break;
+
+                case (k1 == k1max) && (k2 == k2max):
+                nor = normiraj([listaZ[k1-1][k2] - listaZ[k1][k2], listaZ[k1][k2-1] - listaZ[k1][k2], 1]);
+                break;
+
+                case k2 == 0:
+                nor = normiraj([listaZ[k1-1][k2] - listaZ[k1+1][k2], 2 * (listaZ[k1][k2] - listaZ[k1][k2+1]), 2]);
+                break;
+
+                case k2 == k2max:
+                nor = normiraj([listaZ[k1-1][k2] - listaZ[k1+1][k2], 2 * (listaZ[k1][k2-1] - listaZ[k1][k2]), 2]);
+                break;
+
+                case k1 == 0:
+                nor = normiraj([2 * (listaZ[k1][k2] - listaZ[k1+1][k2]), listaZ[k1][k2-1] - listaZ[k1][k2+1], 2]);
+                break;
+
+                case k1 == k1max:
+                nor = normiraj([2 * (listaZ[k1-1][k2] - listaZ[k1][k2]), listaZ[k1][k2-1] - listaZ[k1][k2+1], 2]);
+                break;
+
+                default:
+                nor = normiraj([listaZ[k1-1][k2] - listaZ[k1+1][k2], listaZ[k1][k2-1] - listaZ[k1][k2+1], 2]);
+              }
+              return nor;
+            }
+
+            function plazma(dubina, x1, x2, y1, y2) {
+              var xm, ym, r;
+              if (dubina > 0) {
+
+                xm = (x1 + x2) / 2;
+                ym = (y1 + y2) / 2;
+
+                if (x2 - x1 > 1) {
+                  if (listaZ[xm][y1] == 0) {
+                    r = FAC * gauss() * (x2 - x1);
+                    listaZ[xm][y1] = 0.5 * (listaZ[x1][y1] + listaZ[x2][y1]) + r;
+                  }
+                  if (listaZ[xm][y2] == 0) {
+                    r = FAC * gauss() * (x2 - x1);
+                    listaZ[xm][y2] = 0.5 * (listaZ[x1][y2] + listaZ[x2][y2]) + r;
+                  }
+                } //if x2-x1
+                if (y2 - y1 > 1) {
+                  if (listaZ[x1][ym] == 0) {
+                    r = FAC * gauss() * (y2 - y1);
+                    listaZ[x1][ym] = 0.5 * (listaZ[x1][y1] + listaZ[x1][y2]) + r;
+                  }
+                  if (listaZ[x2][ym] == 0) {
+                    r = FAC * gauss() * (y2 - y1);
+                    listaZ[x2][ym] = 0.5 * (listaZ[x2][y1] + listaZ[x2][y2]) + r;
+                  }
+                } //if y2-y1
+                if ((x2 - x1 > 1) && (y2 - y1 > 1)) {
+                  if (listaZ[xm][ym] == 0) {
+                    r = FAC * gauss() * (x2 - x1 + y2 - y1) / 2.0;
+                    listaZ[xm][ym] = 0.25 * (listaZ[x1][y1] + listaZ[x1][y2] + listaZ[x2][y1] + listaZ[x2][y2]) + r;
+                    plazma(dubina - 1, x1, xm, y1, ym);
+                    plazma(dubina - 1, xm, x2, y1, ym);
+                    plazma(dubina - 1, x1, xm, ym, y2);
+                    plazma(dubina - 1, xm, x2, ym, y2);
+                  }
+                }//x2-x1 i y2-y1
+              } //if dubina
+            }
+
+            function drawScene() {
+              gl.clearColor(0.5,0.5,0.5,1);
+              gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+              gl.viewport(0, 0, kan.width, kan.height);
+
+              gl.bindVertexArray(vao);
+
+              mat.identitet();
+              mat.Perspektiva(54, kan.width/kan.height, 1, 500);
+              mat.postaviKameru(zoom * Math.cos(Math.PI/180 * theta) , zoom * Math.sin(Math.PI/180 * theta), z_kamera, 0,0,0.2*zoom, 0,0,1);
+              mat.pomakni(-(tex_width + 1) / 2, -(tex_height + 1) / 2, 20-0.5*(plazma_min+plazma_max)+0.1*zoom);
+
+              transformacije.splice(0,48, ...mat.poljeModel(), ...mat.poljeMatrica(), ...mat.poljeNormalaBuffer());
+              gl.bindBuffer(gl.UNIFORM_BUFFER, uMatriceBuffer);
+              gl.bufferSubData(gl.UNIFORM_BUFFER, 0, new Float32Array(transformacije));
+              gl.bindBuffer(gl.UNIFORM_BUFFER, null);
+
+              gl.drawElements(gl.TRIANGLE_STRIP, 2 * tex_height * (tex_width + 1) + 2 * (tex_height - 1), gl.UNSIGNED_SHORT, 0);
+            }
+
+            function WebGL_aplikacija() {
+              gl = kan.getContext("webgl2");
+              if (!gl) alert("WEBGL2 nije dostupan!");
+              program = napraviProgram(gl, "vertex-shader", "fragment-shader");
+              gl.useProgram(program);
+
+              program.a_position = gl.getAttribLocation(program, "a_position");
+              program.a_normala = gl.getAttribLocation(program, "a_normala");
+              program.Matrice = gl.getUniformBlockIndex(program, "Matrice");
+              program.SvjetloMaterijal = gl.getUniformBlockIndex(program, "SvjetloMaterijal");
+
+              gl.uniformBlockBinding(program, program.Matrice, 0);
+              gl.uniformBlockBinding(program, program.SvjetloMaterijal, 1);
+              
+              gl.enable(gl.DEPTH_TEST);
+              //gl.enable(gl.CULL_FACE);
+
+              kan.width = kan.width;
+              kan.height = kan.height;
+
+              initBuffers();
+              drawScene();
+            }
+
+            WebGL_aplikacija();
+            resizeCanvas();//resize canvas prilikom pokretanja stranice
+
+            function resizeCanvas() {
+              var displayWidth  = kan.clientWidth;
+              var displayHeight  = kan.clientHeight;
+              if (kan.width != displayWidth ||  kan.height != displayHeight) {
+                kan.width  = displayWidth;
+                kan.height = displayHeight;
+                drawScene();
+              }
+            }
+
+            $(window).resize(resizeCanvas); //resize canvas prilikom svake promjene dimenzija prozora preglednika
+
+            $(window).keydown( function(e) {
+                  e.preventDefault();
+                   switch (e.key)
+                   {
+                      case 'g':
+                      for (var i = 0; i < listaZ.length; i++){
+                        for (var j = 0; j < listaZ[0].length; j++) {
+                          listaZ[i][j] = 0;
+                        }
+                      }
+                      listaZ[0][0] = -1;
+                      listaZ[tex_width][0] = 1;
+                      listaZ[tex_width][tex_height] = -1;
+                      listaZ[0][tex_height] = 1;
+                      plazma(DUBINA, 0, tex_width, 0, tex_height);
+                      plazma_max = Math.max(...listaZ.map(x => Math.max(...x)));
+                      plazma_min = Math.min(...listaZ.map(x => Math.min(...x)));
+                      vrhovi.length = 0;
+                      normale.length = 0;
+                      for (var i = 0; i < listaZ.length; i++) {
+                        for (var j = 0; j < listaZ[0].length; j++) {
+                          vrhovi.push(i,j,listaZ[i][j]);
+                          nor = normala_fun(i,j,d1,d2);
+                          normale.push(nor[0],nor[1],nor[2]);
+                        }
+                      }
+                      gl.bindBuffer(gl.ARRAY_BUFFER, vrhoviBuffer);
+                      gl.bufferSubData(gl.ARRAY_BUFFER, 0, new Float32Array(vrhovi));
+                      gl.bindBuffer(gl.ARRAY_BUFFER, null);
+                      gl.bindBuffer(gl.ARRAY_BUFFER, normaleBuffer);
+                      gl.bufferSubData(gl.ARRAY_BUFFER, 0, new Float32Array(normale));
+                      gl.bindBuffer(gl.ARRAY_BUFFER, null);
+                      drawScene();
+                      break;
+                   }
+                });
+
+
+            $(window).contextmenu( function() { return false; }); //disable right click meni
+
+            var leftDown = false;
+            var rightDown = false;
+            var middleDown = false;
+            var lastMouseX = null;
+            var lastMouseY = null;
+
+            $(window).mousedown(function(event) {
+              switch (event.which) {
+                case 1:
+                leftDown = true;
+                lastMouseX = event.clientX;
+                break;
+
+                case 2:
+                middleDown = true;
+                lastMouseY = event.clientY;
+                break;
+
+                case 3:
+                rightDown = true;
+                lastMouseY = event.clientY;
+                break;
+              } });
+
+            $(window).mouseup(function(event) {
+                switch (event.which) {
+                  case 1:
+                  leftDown = false;
+                  break;
+
+                  case 2:
+                  middleDown = false;
+                  break;
+
+                  case 3:
+                  rightDown = false;
+                  break;
+                } });
+
+            $(window).mousemove(function(event) {
+              if (leftDown) {
+                var newX = event.clientX;
+                var dTheta = 0.125 * (newX - lastMouseX);
+                theta += dTheta;
+                if (theta > 360) theta = theta - 360;
+                if (theta < 0) theta = theta + 360;
+                lastMouseX = newX;
+                drawScene();
+              }
+              if (rightDown) {
+                var newY = event.clientY;
+                var dz = 0.125 * (newY - lastMouseY);
+                z_kamera += dz;
+                if (z_kamera > 100) z_kamera = 100;
+                if (z_kamera < 0) z_kamera = 0;
+                lastMouseY = newY;
+                drawScene();
+              }
+              if (middleDown) {
+              var newY = event.clientY;
+              var dz = 0.125 * (newY - lastMouseY);
+              zoom += dz;
+              if (zoom > 200) zoom = 200;
+              if (zoom < 50) zoom = 50;
+              lastMouseY = newY;
+              drawScene();  
+              }
+            });
+        }
+        </script>
+
+        <script id="vertex-shader" type="x-shader/x-vertex">
+         #version 300 es
+         in vec3 a_position;
+         in vec3 a_normala;
+
+         layout(std140) uniform Matrice {
+             mat4 u_matricaModel;
+             mat4 u_matricaProjekcija;
+             mat3 u_matricaNormala;
+          };
+
+         out vec3 v_normala;
+         out vec3 v_vrh;
+
+         void main(void) {
+           //transformiraj vrh
+           vec4 vrh = u_matricaModel * vec4(a_position, 1.0);
+           //transformiraj normalu
+           v_normala = normalize(u_matricaNormala * a_normala);
+           //vec3 N = a_normala;
+
+           v_vrh = vrh.xyz;
+           gl_Position = u_matricaProjekcija * vec4(a_position, 1.0);
+         }
+        </script>
+
+        <script id="fragment-shader" type="x-shader/x-fragment">
+          #version 300 es
+          precision highp float;
+
+          struct svojstvaSvjetla {
+            vec4 position; //ako je w=0, onda se radi o usmjerenom svjetlu; inace je w = 1
+            vec3 ambient;
+            vec3 diffuse;
+            vec3 specular;
+          };
+
+          struct svojstvaMaterijala {
+            vec3 ambient;
+            vec3 diffuse;
+            vec3 specular;
+            vec3 emissive;
+            float shininess;
+          };
+
+          layout(std140) uniform SvjetloMaterijal {
+             svojstvaSvjetla u_svjetlo;
+             svojstvaMaterijala u_front_materijal;
+             svojstvaMaterijala u_back_materijal;
+             vec3 u_globalniAmbijent;
+          };
+
+          in vec3 v_normala;
+          in vec3 v_vrh;
+          out vec4 outColor;
+
+          void main(void)  {
+            vec3 boja;
+            vec3 L, N;
+            svojstvaMaterijala materijal;
+
+            if (gl_FrontFacing) {
+               materijal = u_back_materijal;
+               N = -v_normala;
+            } else {
+               materijal = u_front_materijal;
+               N = v_normala;
+            }
+
+            if (u_svjetlo.position.w == 0.0) L = normalize(u_svjetlo.position.xyz);
+            else L = normalize(u_svjetlo.position.xyz - v_vrh);
+            //Lambertov faktor
+            float Lambert = dot(N, L);
+            //ambijentalna komponenta
+            vec3 Ia = u_svjetlo.ambient * materijal.ambient;
+            //difuzna komponenta
+            vec3 Id = vec3(0.0, 0.0, 0.0);
+            //zrcalna komponenta
+            vec3 Is = vec3(0.0, 0.0, 0.0);
+
+            if (Lambert > 0.0) {
+              Id = u_svjetlo.diffuse * materijal.diffuse * Lambert;
+              vec3 V = normalize(-v_vrh);
+              vec3 R = reflect(-L, N);
+              float Spec = pow(max(dot(R, V), 0.0), materijal.shininess);
+              Is = u_svjetlo.specular * materijal.specular * Spec;
+            }
+
+            boja = u_globalniAmbijent * materijal.ambient + Ia + Id + Is + materijal.emissive;
+            
+            outColor = vec4(boja, 1.0);
+          }
+        </script>
+
+    </head>
+
+    <body>
+      <script src="skripte/info.js"></script>
+      <div id="infoButton"></div>
+      <div id="infoBox" title="Help">
+
+              <p>Ovaj help možete zatvoriti i ponovo ga otvoriti klikom na <i>info</i> ikonu u gornjem lijevom kutu.</p>
+              <p><b>Tastatura</b></p>
+              <ul style="margin-left: -20px;">
+              <li style="margin-bottom: 5px;">Tipka <code>G</code>: generiranje novog terena</li>
+              </ul>
+              <p><b>Miš</b></p>
+              <ul style="margin-left: -20px;">
+                <li style="margin-bottom: 5px;">Pritisnuta lijeva tipka miša + micanje miša lijevo/desno: rotiranje kamere oko terena</li>
+                <li style="margin-bottom: 5px;">Pritisnuta desna tipka miša + micanje miša gore/dolje: spuštanje i podizanje kamere pri čemu se točka prema kojoj kamera gleda ne mijenja.</li>
+                <li style="margin-bottom: 5px;">Pritisnuta srednja tipka miša + micanje miša gore/dolje: približavanje i udaljavanje od terena</li>
+              </ul>
+        </div>
+
+      <canvas id="kan">
+          Your browser does not support HTML5 canvas.
+      </canvas>
+    </body>
+
+</html>

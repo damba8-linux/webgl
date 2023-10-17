@@ -1,0 +1,999 @@
+<!DOCTYPE html>
+
+<html>
+
+    <head>
+
+        <style>
+          html, body {margin: 0; width: 100%; height: 100%; overflow: hidden;}
+          canvas {width: 100%; height: 100%;}
+        </style>
+
+        <meta charset="utf-8">
+        <title>Globus - bump mapping</title>
+
+        <link rel="stylesheet" type="text/css" href="skripte/jquery-ui.css">
+        <link rel="stylesheet" type="text/css" href="skripte/info.css"/>
+        <script src="skripte/MT3D.js"></script>
+        <script src="skripte/jquery-2.1.3.min.js"></script>
+        <script src="skripte/jquery-ui.js"></script>
+        <script src="skripte/WebGL.js"></script>
+
+        <script language="JavaScript">
+
+        window.onload = program;
+
+        function loadImage(url, funkcija) {
+          var slika = new Image();
+          slika.onload = funkcija;
+          slika.src = url;
+          return slika;
+        }
+
+        function loadImages(urls, funkcija) {
+          var slike = [];
+          var brojSlika = urls.length;
+
+          var onImageLoad = function() {
+            brojSlika--;
+            if (brojSlika == 0) funkcija(slike);
+          };
+
+          for (var i = 0; i < urls.length; i++) {
+            var sl = loadImage(urls[i], onImageLoad);
+            slike.push(sl);
+          }
+        }
+
+        function program() {
+          loadImages(['pictures/glob.png','pictures/glob_normal2.png','pictures/glob_normal.png'], WEBGLapp);
+        }
+
+        function odredi_normalu(u, v) {
+          var vek = [0,0,0];
+          var d;
+          vek[0] = u[1]*v[2] - u[2]*v[1];
+          vek[1] = u[2]*v[0] - u[0]*v[2];
+          vek[2] = u[0]*v[1] - u[1]*v[0];
+          d = Math.sqrt(vek[0]*vek[0] + vek[1]*vek[1] + vek[2]*vek[2]);
+          vek[0] /= d;
+          vek[1] /= d;
+          vek[2] /= d;
+          return vek;
+        }
+
+       function WEBGLapp(slike) {
+            var kan = document.getElementById("kan");
+            var nv = 40; //gustoca razdiobe baze valjka
+            var dtv = 2*Math.PI / nv;
+            //parametri za suplji valjak
+            var r1 = 3.5, r2 = 3, h = 0.3;
+            var kut1 = -15 * Math.PI / 180, kut2 = 176 * Math.PI / 180;
+            var dphi = (kut2 - kut1) / nv;
+            //parametri za kuglu
+            var p_k = 30; //broj paralela
+            var m_k = 36; //broj meridijana
+            var r_k = 2.3; //polumjer kugle
+            var dphi_k = 2*Math.PI / m_k, phi_k;
+            var dtheta_k = Math.PI / (p_k + 1), theta_k = 0;
+
+            //rebrasti valjak
+            vrhovi_rebrastiValjak = [];
+            normale_rebrastiValjak = [];
+            //plast
+            for (var t = 0; t < 2 * Math.PI; t += dtv) {
+              vrhovi_rebrastiValjak.push(2 * Math.cos(t), 2 * Math.sin(t), 0);
+              vrhovi_rebrastiValjak.push(2 * Math.cos(t + dtv), 2 * Math.sin(t + dtv), 0);
+              vrhovi_rebrastiValjak.push(Math.cos(t), Math.sin(t), 1.2);
+              vrhovi_rebrastiValjak.push(Math.cos(t + dtv), Math.sin(t + dtv), 1.2);
+
+              var nor = odredi_normalu([Math.cos(t + dtv) - Math.cos(t), Math.sin(t + dtv) - Math.sin(t), 0],[-Math.cos(t), -Math.sin(t), 1.2]);
+
+              normale_rebrastiValjak.push(nor[0], nor[1], nor[2]);
+              normale_rebrastiValjak.push(nor[0], nor[1], nor[2]);
+              normale_rebrastiValjak.push(nor[0], nor[1], nor[2]);
+              normale_rebrastiValjak.push(nor[0], nor[1], nor[2]);
+            }
+            //gornja baza
+            vrhovi_rebrastiValjak.push(0,0,1.2);
+            normale_rebrastiValjak.push(0,0,1);
+            for (var t = 0; t < 2 * Math.PI + dtv/2; t += dtv) {
+              vrhovi_rebrastiValjak.push(Math.cos(t),  Math.sin(t), 1.2);
+              normale_rebrastiValjak.push(Math.cos(t), Math.sin(t), 0.2);
+            }
+            //donja baza
+            vrhovi_rebrastiValjak.push(0,0,0);
+            normale_rebrastiValjak.push(0,0,-1);
+            for (var t = 0; t < 2 * Math.PI + dtv/2; t += dtv) {
+              vrhovi_rebrastiValjak.push(2 * Math.cos(t),  -2 * Math.sin(t), 0); // minus predznak zbog cullinga i orijentacije
+              normale_rebrastiValjak.push(0,0,-1);
+            }
+
+            //suplji valjak
+            var vrhovi_supljiValjak = [];
+            var normale_plast_supljiValjak = [];
+            var normale_baza_supljiValjak = [];
+            for (var t = kut1; t < kut2 + dphi/2; t += dphi) {
+              //donji vanjski rub
+              vrhovi_supljiValjak.push(r1 * Math.cos(t), r1 * Math.sin(t), 0);
+              normale_plast_supljiValjak.push(Math.cos(t), Math.sin(t), 0);
+              normale_baza_supljiValjak.push(0, 0, -1);
+              //donji unutarnji rub
+              vrhovi_supljiValjak.push(r2 * Math.cos(t), r2 * Math.sin(t), 0);
+              normale_plast_supljiValjak.push(-Math.cos(t), -Math.sin(t), 0);
+              normale_baza_supljiValjak.push(0, 0, -1);
+              //gornji vanjski rub
+              vrhovi_supljiValjak.push(r1 * Math.cos(t), r1 * Math.sin(t), h);
+              normale_plast_supljiValjak.push(Math.cos(t), Math.sin(t), 0);
+              normale_baza_supljiValjak.push(0, 0, 1);
+              //gornji unutarnji rub
+              vrhovi_supljiValjak.push(r2 * Math.cos(t), r2 * Math.sin(t), h);
+              normale_plast_supljiValjak.push(-Math.cos(t), -Math.sin(t), 0);
+              normale_baza_supljiValjak.push(0, 0, 1);
+            }
+            //polje indeksa za vanjski plast
+            var indeksi_vanjskiPlast = [2, 0];
+            for (var i = 2; i < 2*(nv+1); i++) {
+              indeksi_vanjskiPlast[i] =  indeksi_vanjskiPlast[i-2] + 4;
+            }
+            //polje indeksa za unutarnji plast
+            var indeksi_unutarnjiPlast = [1, 3];
+            for (var i = 2; i < 2*(nv+1); i++) {
+              indeksi_unutarnjiPlast[i] =  indeksi_unutarnjiPlast[i-2] + 4;
+            }
+            //polje indeksa za gornju bazu
+            var indeksi_gornjaBaza = [3, 2];
+            for (var i = 2; i < 2*(nv+1); i++) {
+              indeksi_gornjaBaza[i] =  indeksi_gornjaBaza[i-2] + 4;
+            }
+            //polje indeksa za donju bazu
+            var indeksi_donjaBaza = [0, 1];
+            for (var i = 2; i < 2*(nv+1); i++) {
+              indeksi_donjaBaza[i] =  indeksi_donjaBaza[i-2] + 4;
+            }
+            //poklopci
+            var vrhovi_poklopac_supljiValjak = [r1 * Math.cos(kut1), r1 * Math.sin(kut1), 0,
+                                                r1 * Math.cos(kut1), r1 * Math.sin(kut1), h,
+                                                r2 * Math.cos(kut1), r2 * Math.sin(kut1), 0,
+                                                r2 * Math.cos(kut1), r2 * Math.sin(kut1), h,
+                                                r1 * Math.cos(kut2), r1 * Math.sin(kut2), 0,
+                                                r1 * Math.cos(kut2), r1 * Math.sin(kut2), h,
+                                                r2 * Math.cos(kut2), r2 * Math.sin(kut2), 0,
+                                                r2 * Math.cos(kut2), r2 * Math.sin(kut2), h];
+            
+            var normale_poklopac_supljiValjak = [Math.sin(kut1), -Math.cos(kut1), 0,
+                                                 Math.sin(kut1), -Math.cos(kut1), 0,
+                                                 Math.sin(kut1), -Math.cos(kut1), 0,
+                                                 Math.sin(kut1), -Math.cos(kut1), 0,
+                                                 -Math.sin(kut2), Math.cos(kut2), 0,
+                                                 -Math.sin(kut2), Math.cos(kut2), 0,
+                                                 -Math.sin(kut2), Math.cos(kut2), 0,
+                                                 -Math.sin(kut2), Math.cos(kut2), 0];
+                                                 
+            var indeksi_poklopac = [0,1,2, 2,1,3, 6,5,4, 7,5,6];
+
+            //kugla
+            var vrhovi_kugla = [];
+            var tangente_kugla = [];
+            var normale_kugla = [];
+            var tex_kugla = [];
+            for (var i = 1; i <= p_k; i++) {
+              theta_k += dtheta_k;
+              phi_k = 0;
+              for (var j = 1; j <= m_k + 1; j++) {
+                vrhovi_kugla.push(r_k*Math.cos(phi_k)*Math.sin(theta_k), r_k*Math.sin(phi_k)*Math.sin(theta_k), r_k*Math.cos(theta_k));
+                tangente_kugla.push(-Math.sin(phi_k), Math.cos(phi_k), 0);
+                normale_kugla.push(Math.cos(phi_k)*Math.sin(theta_k), Math.sin(phi_k)*Math.sin(theta_k), Math.cos(theta_k));
+                tex_kugla.push(phi_k/(2*Math.PI), theta_k/Math.PI);
+                phi_k += dphi_k;
+              }
+            }
+            //dodajemo jos sjeverni i juzni pol
+            vrhovi_kugla.push(0,0,r_k, 0,0,-r_k);
+            tangente_kugla.push(1,0,0, 1,0,0);
+            normale_kugla.push(0,0,1, 0,0,-1);
+            tex_kugla.push(0,0, 0,1);
+            //indeksi za gornju kapicu
+            var indeksi_kugla = [p_k*(m_k+1)];
+            for (var i = 0; i < m_k + 1; i++) indeksi_kugla.push(i);
+            //indeksi za donju kapicu
+            indeksi_kugla.push(p_k*(m_k+1)+1);
+            for (var i = 1; i <= m_k + 1; i++) indeksi_kugla.push(p_k*(m_k+1)-i);
+            //indeksi za preostale slojeve
+            for (var i = 1; i < p_k; i++) {
+              for (var k = 0; k < m_k + 1; k++) {
+                indeksi_kugla.push((i-1)*(m_k+1)+k, i*(m_k+1)+k);
+              }
+            }
+
+            //dva drzaca kugle modelirani kao plastevi valjaka
+            var vrhovi_drzac = [];
+            var normale_drzac = [];
+            for (var t = 0; t < 2 * Math.PI + dtv/2; t += dtv) {
+              vrhovi_drzac.push(0.15 * Math.cos(t), 0.15 * Math.sin(t), 1);
+              vrhovi_drzac.push(0.15 * Math.cos(t), 0.15 * Math.sin(t), 0);
+              normale_drzac.push(Math.cos(t), Math.sin(t), 0);
+              normale_drzac.push(Math.cos(t), Math.sin(t), 0);
+            }
+
+            //bufferi
+            var vrhoviRebrastiValjakBuffer, normaleRebrastiValjakBuffer;
+            var vrhoviSupljiValjakBuffer, normalePlastSupljiValjakBuffer, normaleBazaSupljiValjakBuffer;
+            var indeksiUnutarnjiPlastBuffer, indeksiVanjskiPlastBuffer;
+            var indeksiGornjaBazaBuffer, indeksiDonjaBazaBuffer;
+            var vrhoviPoklopacSupljiValjakBuffer, normalePoklopacSupljiValjakBuffer;
+            var indeksiPoklopacBuffer;
+            var vrhoviKuglaBuffer, normaleKuglaBuffer, texKuglaBuffer, tangenteKuglaBuffer, indeksiKuglaBuffer;
+            var vrhoviDrzacBuffer, normaleDrzacBuffer;
+            var uMatriceBuffer, uSvjetloMaterijalBuffer;
+
+            //vertex array object
+            var vaoSV_vanjskiPlast, vaoSV_unutarnjiPlast, vaoSV_gornjaBaza, vaoSV_donjaBaza;
+            var vaoSV_poklopac, vaoDrzac, vaoKugla, vaoRV;
+            
+            var kut = 0; //rotiranje globusa
+            var theta = 0; //kretanje kamere oko globusa 
+            var z_kamera = 1; //visina kamere
+            var zoom = 14; //udaljenost kamere od ishodista
+
+            //animacija
+            var animacija = false;
+            var now, old = Date.now();
+
+            var mat = new MT3D();
+            mat.postaviKameru(14,0,1, 0,0,0, 0,0,1);
+
+            var transformacije = [];
+            transformacije.push(...mat.poljeModel(), ...mat.poljeMatrica(), ...mat.poljeNormalaBuffer());
+
+            var svjetlo_materijal = [];
+            svjetlo_materijal.push(...mat.kamera_slika_tocke([14, 0, 5, 1]), //pozicija (svjetlo), byte offset: 0 
+                                   0.2,0.2,0.2,0, //ambient (svjetlo), byte offset: 16
+                                   1,1,1,0, //diffuse (svjetlo), byte offset: 32
+                                   1,1,1,0, //specular (svjetlo), byte offset: 48
+                                   0.2,0.2,0.2,0, //ambient materijal, byte offset: 64
+                                   192/255,192/255,215/255,0, //diffuse materijal, byte offset: 80
+                                   0.5,0.5,0.5,0, //specular materijal, byte offset: 96
+                                   15/255,11/255,15/255,10, //emissive i shininess materijal, byte offset: 112
+                                   0.2,0.2,0.2,0); //globalni ambijent, byte offset: 128
+
+            var gl = null, program1 = null, program2 = null;
+            var tekstura = []; //za kreiranje teksture
+
+            //bump mapping verzija
+            //0 - nema bump mappinga, 1 - manje izbocine i udubljenja, 2 - jace izbocine i udubljenja
+            var bump_verzija = 1;
+
+            //tekstura vidljiva ili skrivena 1/0
+            var show_tex = 1;
+
+            function initBuffers() {
+              vrhoviRebrastiValjakBuffer = gl.createBuffer();
+              normaleRebrastiValjakBuffer = gl.createBuffer();
+              vrhoviSupljiValjakBuffer = gl.createBuffer();
+              normalePlastSupljiValjakBuffer = gl.createBuffer();
+              normaleBazaSupljiValjakBuffer = gl.createBuffer();
+              indeksiUnutarnjiPlastBuffer = gl.createBuffer();
+              indeksiVanjskiPlastBuffer = gl.createBuffer();
+              indeksiGornjaBazaBuffer = gl.createBuffer();
+              indeksiDonjaBazaBuffer = gl.createBuffer();
+              vrhoviPoklopacSupljiValjakBuffer = gl.createBuffer();
+              normalePoklopacSupljiValjakBuffer = gl.createBuffer();
+              indeksiPoklopacBuffer = gl.createBuffer();
+              vrhoviKuglaBuffer = gl.createBuffer();
+              normaleKuglaBuffer = gl.createBuffer();
+              tangenteKuglaBuffer = gl.createBuffer();
+              texKuglaBuffer = gl.createBuffer();
+              indeksiKuglaBuffer = gl.createBuffer();
+              vrhoviDrzacBuffer = gl.createBuffer();
+              normaleDrzacBuffer = gl.createBuffer();
+              uMatriceBuffer = gl.createBuffer(); 
+              uSvjetloMaterijalBuffer = gl.createBuffer();
+
+              vaoRebrastiValjak = gl.createVertexArray();
+              vaoSV_vanjskiPlast = gl.createVertexArray();
+              vaoSV_unutarnjiPlast = gl.createVertexArray();
+              vaoSV_donjaBaza = gl.createVertexArray();
+              vaoSV_donjaBaza = gl.createVertexArray();
+              vaoSV_poklopac = gl.createVertexArray();
+              vaoDrzac = gl.createVertexArray();
+              vaoKugla = gl.createVertexArray();
+
+              tekstura[0] = gl.createTexture();
+              gl.bindTexture(gl.TEXTURE_2D, tekstura[0]);
+              gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+              gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_NEAREST);
+              //gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+              gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, slike[0]);
+              gl.generateMipmap(gl.TEXTURE_2D);
+              gl.bindTexture(gl.TEXTURE_2D, null);
+
+              tekstura[1] = gl.createTexture();
+              gl.bindTexture(gl.TEXTURE_2D, tekstura[1]);
+              gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+              gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_NEAREST);
+              //gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+              gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, slike[1]);
+              gl.generateMipmap(gl.TEXTURE_2D);
+              gl.bindTexture(gl.TEXTURE_2D, null);
+
+              tekstura[2] = gl.createTexture();
+              gl.bindTexture(gl.TEXTURE_2D, tekstura[2]);
+              gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+              gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_NEAREST);
+              //gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+              gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, slike[2]);
+              gl.generateMipmap(gl.TEXTURE_2D);
+              gl.bindTexture(gl.TEXTURE_2D, null);
+
+              gl.bindBuffer(gl.UNIFORM_BUFFER, uMatriceBuffer);
+              gl.bufferData(gl.UNIFORM_BUFFER, new Float32Array(transformacije), gl.DYNAMIC_DRAW);
+              gl.bindBuffer(gl.UNIFORM_BUFFER, null);
+
+              gl.bindBuffer(gl.UNIFORM_BUFFER, uSvjetloMaterijalBuffer);
+              gl.bufferData(gl.UNIFORM_BUFFER, new Float32Array(svjetlo_materijal), gl.DYNAMIC_DRAW);
+              gl.bindBuffer(gl.UNIFORM_BUFFER, null);
+
+              gl.bindBufferBase(gl.UNIFORM_BUFFER, 0, uMatriceBuffer);
+              gl.bindBufferBase(gl.UNIFORM_BUFFER, 1, uSvjetloMaterijalBuffer);
+
+              gl.bindVertexArray(vaoRebrastiValjak);
+              gl.enableVertexAttribArray(0);
+              gl.enableVertexAttribArray(1);
+
+              gl.bindBuffer(gl.ARRAY_BUFFER, vrhoviRebrastiValjakBuffer);
+              gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+              gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vrhovi_rebrastiValjak), gl.STATIC_DRAW);
+              gl.bindBuffer(gl.ARRAY_BUFFER, null);
+              
+              gl.bindBuffer(gl.ARRAY_BUFFER, normaleRebrastiValjakBuffer);
+              gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 0, 0);
+              gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(normale_rebrastiValjak), gl.STATIC_DRAW);
+              gl.bindBuffer(gl.ARRAY_BUFFER, null);
+
+              gl.bindVertexArray(vaoSV_vanjskiPlast);
+              gl.enableVertexAttribArray(0);
+              gl.enableVertexAttribArray(1);
+
+              gl.bindBuffer(gl.ARRAY_BUFFER, vrhoviSupljiValjakBuffer);
+              gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+              gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vrhovi_supljiValjak), gl.STATIC_DRAW);
+              gl.bindBuffer(gl.ARRAY_BUFFER, null);
+
+              gl.bindBuffer(gl.ARRAY_BUFFER, normalePlastSupljiValjakBuffer);
+              gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 0, 0);
+              gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(normale_plast_supljiValjak), gl.STATIC_DRAW);
+              gl.bindBuffer(gl.ARRAY_BUFFER, null);
+
+              gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indeksiVanjskiPlastBuffer);
+              gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint8Array(indeksi_vanjskiPlast), gl.STATIC_DRAW);
+
+              gl.bindVertexArray(vaoSV_unutarnjiPlast);
+              gl.enableVertexAttribArray(0);
+              gl.enableVertexAttribArray(1);
+
+              gl.bindBuffer(gl.ARRAY_BUFFER, vrhoviSupljiValjakBuffer);
+              gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+              gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vrhovi_supljiValjak), gl.STATIC_DRAW);
+              gl.bindBuffer(gl.ARRAY_BUFFER, null);
+
+              gl.bindBuffer(gl.ARRAY_BUFFER, normalePlastSupljiValjakBuffer);
+              gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 0, 0);
+              gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(normale_plast_supljiValjak), gl.STATIC_DRAW);
+              gl.bindBuffer(gl.ARRAY_BUFFER, null);
+
+              gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indeksiUnutarnjiPlastBuffer);
+              gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint8Array(indeksi_unutarnjiPlast), gl.STATIC_DRAW);
+
+              gl.bindVertexArray(vaoSV_gornjaBaza);
+              gl.enableVertexAttribArray(0);
+              gl.enableVertexAttribArray(1);
+
+              gl.bindBuffer(gl.ARRAY_BUFFER, vrhoviSupljiValjakBuffer);
+              gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+              gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vrhovi_supljiValjak), gl.STATIC_DRAW);
+              gl.bindBuffer(gl.ARRAY_BUFFER, null);
+
+              gl.bindBuffer(gl.ARRAY_BUFFER, normaleBazaSupljiValjakBuffer);
+              gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 0, 0);
+              gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(normale_baza_supljiValjak), gl.STATIC_DRAW);
+              gl.bindBuffer(gl.ARRAY_BUFFER, null);
+
+              gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indeksiGornjaBazaBuffer);
+              gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint8Array(indeksi_gornjaBaza), gl.STATIC_DRAW);
+
+              gl.bindVertexArray(vaoSV_donjaBaza);
+              gl.enableVertexAttribArray(0);
+              gl.enableVertexAttribArray(1);
+
+              gl.bindBuffer(gl.ARRAY_BUFFER, vrhoviSupljiValjakBuffer);
+              gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+              gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vrhovi_supljiValjak), gl.STATIC_DRAW);
+              gl.bindBuffer(gl.ARRAY_BUFFER, null);
+
+              gl.bindBuffer(gl.ARRAY_BUFFER, normaleBazaSupljiValjakBuffer);
+              gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 0, 0);
+              gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(normale_baza_supljiValjak), gl.STATIC_DRAW);
+              gl.bindBuffer(gl.ARRAY_BUFFER, null);
+
+              gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indeksiDonjaBazaBuffer);
+              gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint8Array(indeksi_donjaBaza), gl.STATIC_DRAW);
+
+              gl.bindVertexArray(vaoSV_poklopac);
+              gl.enableVertexAttribArray(0);
+              gl.enableVertexAttribArray(1);
+
+              gl.bindBuffer(gl.ARRAY_BUFFER, vrhoviPoklopacSupljiValjakBuffer);
+              gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+              gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vrhovi_poklopac_supljiValjak), gl.STATIC_DRAW);
+              gl.bindBuffer(gl.ARRAY_BUFFER, null);
+
+              gl.bindBuffer(gl.ARRAY_BUFFER, normalePoklopacSupljiValjakBuffer);
+              gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 0, 0);
+              gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(normale_poklopac_supljiValjak), gl.STATIC_DRAW);
+              gl.bindBuffer(gl.ARRAY_BUFFER, null);
+
+              gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indeksiPoklopacBuffer);
+              gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint8Array(indeksi_poklopac), gl.STATIC_DRAW);
+
+              gl.bindVertexArray(vaoDrzac);
+              gl.enableVertexAttribArray(0);
+              gl.enableVertexAttribArray(1);
+
+              gl.bindBuffer(gl.ARRAY_BUFFER, vrhoviDrzacBuffer);
+              gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+              gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vrhovi_drzac), gl.STATIC_DRAW);
+              gl.bindBuffer(gl.ARRAY_BUFFER, null);
+
+              gl.bindBuffer(gl.ARRAY_BUFFER, normaleDrzacBuffer);
+              gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 0, 0);
+              gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(normale_drzac), gl.STATIC_DRAW);
+              gl.bindBuffer(gl.ARRAY_BUFFER, null);
+
+              gl.bindVertexArray(vaoKugla);
+              gl.enableVertexAttribArray(0);
+              gl.enableVertexAttribArray(1);
+              gl.enableVertexAttribArray(2);
+              gl.enableVertexAttribArray(3);
+
+              gl.bindBuffer(gl.ARRAY_BUFFER, vrhoviKuglaBuffer);
+              gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+              gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vrhovi_kugla), gl.STATIC_DRAW);
+              gl.bindBuffer(gl.ARRAY_BUFFER, null);
+              
+              gl.bindBuffer(gl.ARRAY_BUFFER, normaleKuglaBuffer);
+              gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 0, 0);
+              gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(normale_kugla), gl.STATIC_DRAW);
+              gl.bindBuffer(gl.ARRAY_BUFFER, null);
+
+              gl.bindBuffer(gl.ARRAY_BUFFER, tangenteKuglaBuffer);
+              gl.vertexAttribPointer(2, 3, gl.FLOAT, false, 0, 0);
+              gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(tangente_kugla), gl.STATIC_DRAW);
+              gl.bindBuffer(gl.ARRAY_BUFFER, null);
+              
+              gl.bindBuffer(gl.ARRAY_BUFFER, texKuglaBuffer);
+              gl.vertexAttribPointer(3, 2, gl.FLOAT, false, 0, 0);
+              gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(tex_kugla), gl.STATIC_DRAW);
+              gl.bindBuffer(gl.ARRAY_BUFFER, null);
+
+              gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indeksiKuglaBuffer);
+              gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indeksi_kugla), gl.STATIC_DRAW);
+
+              gl.bindVertexArray(null);  
+            }
+
+          function drawScene() {
+              gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+              gl.viewport(0, 0, kan.width, kan.height);
+
+              gl.useProgram(program1);
+              gl.bindVertexArray(vaoRebrastiValjak);
+
+              mat.identitet();
+              mat.PerspektivnaProjekcijaX(-3.5, 3.5, -3, 2.5, 5, 100, kan.width, kan.height);
+              mat.postaviKameru(zoom * Math.cos(Math.PI/180 * theta) , zoom * Math.sin(Math.PI/180 * theta), z_kamera, 0,0,0, 0,0,1);
+
+              mat.spremiMatricu();
+              mat.pomakni(0,0,-4.65);
+
+              transformacije.splice(0,48,...mat.poljeModel(), ...mat.poljeMatrica(), ...mat.poljeNormalaBuffer());
+              gl.bindBuffer(gl.UNIFORM_BUFFER, uMatriceBuffer);
+              gl.bufferSubData(gl.UNIFORM_BUFFER, 0, new Float32Array(transformacije));
+
+              svjetlo_materijal.splice(16,3, 0.2,0.2,0.2);
+              gl.bindBuffer(gl.UNIFORM_BUFFER, uSvjetloMaterijalBuffer);
+              gl.bufferSubData(gl.UNIFORM_BUFFER, 64, new Float32Array(svjetlo_materijal), 16, 3);
+              gl.bindBuffer(gl.UNIFORM_BUFFER, null);
+
+              gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4*nv);
+              gl.drawArrays(gl.TRIANGLE_FAN, 4*nv, nv+2);
+              gl.drawArrays(gl.TRIANGLE_FAN, 5*nv+2, nv+2);
+
+              gl.bindVertexArray(vaoSV_vanjskiPlast);
+
+              mat.vratiMatricu();
+              mat.spremiMatricu();
+              mat.rotirajY(90);
+              mat.pomakni(0,0,-0.15);
+
+              transformacije.splice(0,48,...mat.poljeModel(), ...mat.poljeMatrica(), ...mat.poljeNormalaBuffer());
+              gl.bindBuffer(gl.UNIFORM_BUFFER, uMatriceBuffer);
+              gl.bufferSubData(gl.UNIFORM_BUFFER, 0, new Float32Array(transformacije));
+              gl.bindBuffer(gl.UNIFORM_BUFFER, null);
+
+              gl.drawElements(gl.TRIANGLE_STRIP, 2*nv+2, gl.UNSIGNED_BYTE, 0);
+
+              gl.bindVertexArray(vaoSV_unutarnjiPlast);
+              gl.drawElements(gl.TRIANGLE_STRIP, 2*nv+2, gl.UNSIGNED_BYTE, 0);
+
+              gl.bindVertexArray(vaoSV_gornjaBaza);
+              gl.drawElements(gl.TRIANGLE_STRIP, 2*nv+2, gl.UNSIGNED_BYTE, 0);
+
+              gl.bindVertexArray(vaoSV_donjaBaza);
+              gl.drawElements(gl.TRIANGLE_STRIP, 2*nv+2, gl.UNSIGNED_BYTE, 0);
+
+              gl.bindVertexArray(vaoSV_poklopac);
+              gl.drawElements(gl.TRIANGLES, 12, gl.UNSIGNED_BYTE, 0);
+
+              gl.bindVertexArray(vaoDrzac);
+
+              mat.vratiMatricu();
+              
+              mat.rotirajX(-10);
+              mat.rotirajZ(kut);
+
+              mat.spremiMatricu();
+              mat.pomakni(0,0,r_k-0.1);
+
+              transformacije.splice(0,48,...mat.poljeModel(), ...mat.poljeMatrica(), ...mat.poljeNormalaBuffer());
+              gl.bindBuffer(gl.UNIFORM_BUFFER, uMatriceBuffer);
+              gl.bufferSubData(gl.UNIFORM_BUFFER, 0, new Float32Array(transformacije));
+              gl.bindBuffer(gl.UNIFORM_BUFFER, null);
+
+              gl.drawArrays(gl.TRIANGLE_STRIP, 0, 2*nv+2);
+
+              mat.pomakni(0,0,-2*r_k-0.8);
+
+              transformacije.splice(0,48,...mat.poljeModel(), ...mat.poljeMatrica(), ...mat.poljeNormalaBuffer());
+              gl.bindBuffer(gl.UNIFORM_BUFFER, uMatriceBuffer);
+              gl.bufferSubData(gl.UNIFORM_BUFFER, 0, new Float32Array(transformacije));
+              gl.bindBuffer(gl.UNIFORM_BUFFER, null);
+
+              gl.drawArrays(gl.TRIANGLE_STRIP, 0, 2*nv+2);
+
+              mat.vratiMatricu();
+
+              gl.useProgram(program2);
+              gl.uniform1i(program2.u_bump_verzija, bump_verzija);
+              gl.uniform1i(program2.u_show_tex, show_tex);
+              gl.bindVertexArray(vaoKugla);
+
+              gl.activeTexture(gl.TEXTURE0);
+              gl.bindTexture(gl.TEXTURE_2D, tekstura[0]);
+              gl.uniform1i(program2.u_slika, 0);
+
+              if (bump_verzija < 2) { //za verziju 0 ne treba, ali nesto se mora proslijediti shaderu
+               gl.activeTexture(gl.TEXTURE1);
+               gl.bindTexture(gl.TEXTURE_2D, tekstura[1]);
+               gl.uniform1i(program2.u_normalMap, 1);
+              } else {
+               gl.activeTexture(gl.TEXTURE2);
+               gl.bindTexture(gl.TEXTURE_2D, tekstura[2]);
+               gl.uniform1i(program2.u_normalMap, 2);
+              }
+              
+              transformacije.splice(0,48,...mat.poljeModel(), ...mat.poljeMatrica(), ...mat.poljeNormalaBuffer());
+              gl.bindBuffer(gl.UNIFORM_BUFFER, uMatriceBuffer);
+              gl.bufferSubData(gl.UNIFORM_BUFFER, 0, new Float32Array(transformacije));
+
+              svjetlo_materijal.splice(16,3, 0.7,0.7,0.7);
+              gl.bindBuffer(gl.UNIFORM_BUFFER, uSvjetloMaterijalBuffer);
+              gl.bufferSubData(gl.UNIFORM_BUFFER, 64, new Float32Array(svjetlo_materijal), 16, 3);
+              gl.bindBuffer(gl.UNIFORM_BUFFER, null);
+
+              gl.drawElements(gl.TRIANGLE_FAN, m_k+2, gl.UNSIGNED_SHORT, 0);
+              gl.drawElements(gl.TRIANGLE_FAN, m_k+2, gl.UNSIGNED_SHORT, (m_k+2)*2); //offset je u bajtima; za UNSIGNED_SHORT se koriste dva bajta
+              gl.drawElements(gl.TRIANGLE_STRIP, (2*m_k+2)*(p_k-1), gl.UNSIGNED_SHORT, 4*m_k+8);
+            }
+
+            function WebGL_aplikacija() {
+              gl = kan.getContext("webgl2");
+              if (!gl) alert("WEBGL2 nije dostupan!");
+              gl.clearColor(0, 0, 0, 1);
+              program1 = napraviProgram(gl, "vertex-shader1", "fragment-shader1");
+              program2 = napraviProgram(gl, "vertex-shader2", "fragment-shader2");
+
+              program1.Matrice = gl.getUniformBlockIndex(program1, "Matrice");
+              program1.SvjetloMaterijal = gl.getUniformBlockIndex(program1, "SvjetloMaterijal");
+
+              program2.Matrice = gl.getUniformBlockIndex(program2, "Matrice");
+              program2.SvjetloMaterijal = gl.getUniformBlockIndex(program2, "SvjetloMaterijal");
+              program2.u_slika = gl.getUniformLocation(program2, "u_slika");
+              program2.u_normalMap = gl.getUniformLocation(program2, "u_normalMap");
+              program2.u_bump_verzija = gl.getUniformLocation(program2, "u_bump_verzija");
+              program2.u_show_tex = gl.getUniformLocation(program2, "u_show_tex");
+
+              gl.uniformBlockBinding(program1, program1.Matrice, 0);
+              gl.uniformBlockBinding(program1, program1.SvjetloMaterijal, 1);
+              gl.uniformBlockBinding(program2, program2.Matrice, 0);
+              gl.uniformBlockBinding(program2, program2.SvjetloMaterijal, 1);
+
+              //da crta teksturu od gore prema dolje
+              //(0,0) gornji lijevi kut, (1,1) donji desni kut
+              //gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+
+              gl.enable(gl.DEPTH_TEST);
+              gl.enable(gl.CULL_FACE);
+
+              initBuffers();
+            }
+
+            function rotiraj_globus() {
+              if (animacija) {
+                requestAnimationFrame(rotiraj_globus);
+                now = Date.now();
+                kut += (now - old) * 0.025; //svakih 40 milisekundi promijeni kut za 1 stupanj
+                if (kut >= 360) kut = kut - 360;
+                old = now;
+                drawScene();
+              }
+            }
+
+            WebGL_aplikacija();
+            resizeCanvas(); //resize canvas prilikom pokretanja stranice
+            rotiraj_globus();
+
+            function resizeCanvas() {
+              var displayWidth  = kan.clientWidth;
+              var displayHeight  = kan.clientHeight;
+              if (kan.width != displayWidth ||  kan.height != displayHeight) {
+                kan.width  = displayWidth;
+                kan.height = displayHeight;
+                drawScene();
+              }
+            }
+
+            $(window).resize(resizeCanvas); //resize canvas prilikom svake promjene dimenzija prozora preglednika
+
+            $(window).keydown( function(e) {
+                  e.preventDefault();
+                   switch (e.keyCode)
+                   {
+                      case 37://left arrow
+                      if (!animacija) {
+                        if (kut > 0) kut -= 2;
+                        else kut = 358;
+                        drawScene();
+                      }
+                      break;
+
+                      case 39://right arrow
+                      if (!animacija) {
+                        if (kut < 358) kut += 2;
+                        else kut = 0;
+                        drawScene();
+                      }
+                      break;
+
+                      case 38://up arrow
+                      if (zoom < 18) zoom += 0.2;
+                      drawScene();
+                      break;
+
+                      case 40://down arrow
+                      if (zoom > 8.8) zoom -=0.2;
+                      drawScene();
+                      break;
+
+                      case 65://a
+                      if (animacija) animacija = false;
+                      else {
+                        animacija = true;
+                        old = Date.now();
+                        rotiraj_globus();
+                      }
+                      break;
+
+                      case 66://b
+                      bump_verzija = (bump_verzija + 1) % 3;
+                      drawScene();
+                      break;
+
+                      case 84://t
+                      if (show_tex == 1) show_tex = 0;
+                      else show_tex = 1;
+                      drawScene();
+                      break; 
+                   }
+                });
+
+            $(window).contextmenu( function() { return false; }); //disable right click meni
+
+            var leftDown = false;
+            var rightDown = false;
+            var lastMouseX = null;
+            var lastMouseY = null;
+
+            $(window).mousedown(function(event) {
+              switch (event.which) {
+                case 1:
+                leftDown = true;
+                lastMouseX = event.clientX;
+                break;
+
+                case 3:
+                rightDown = true;
+                lastMouseY = event.clientY;
+                break;
+              } });
+
+            $(window).mouseup(function(event) {
+                switch (event.which) {
+                  case 1:
+                  leftDown = false;
+                  break;
+
+                  case 3:
+                  rightDown = false;
+                  break;
+                } });
+
+            $(window).mousemove(function(event) {
+              if (leftDown) {
+                var newX = event.clientX;
+                var dTheta = 0.125 * (newX - lastMouseX);
+                theta += dTheta;
+                if (theta > 360) theta = theta - 360;
+                if (theta < 0) theta = theta + 360;
+                lastMouseX = newX;
+                drawScene();
+              }
+              if (rightDown) {
+                var newY = event.clientY;
+                var dFi = 0.05 * (newY - lastMouseY);
+                z_kamera += dFi;
+                if (z_kamera > 10) z_kamera = 10;
+                if (z_kamera < -10) z_kamera = -10;
+                lastMouseY = newY;
+                drawScene();
+              }
+            });
+      }
+      </script>
+
+      <script id="vertex-shader1" type="x-shader/x-vertex">
+          #version 300 es
+          struct svojstvaSvjetla {
+            vec4 position; //ako je w=0, onda se radi o usmjerenom svjetlu; inace je w = 1
+            vec3 ambient;
+            vec3 diffuse;
+            vec3 specular;
+          };
+
+          struct svojstvaMaterijala {
+            vec3 ambient;
+            vec3 diffuse;
+            vec3 specular;
+            vec3 emissive;
+            float shininess;
+          };
+
+          layout(location = 0) in vec3 a_position;
+          layout(location = 1) in vec3 a_normala;
+
+          layout(std140) uniform Matrice {
+              mat4 u_matricaModel;
+              mat4 u_matricaProjekcija;
+              mat3 u_matricaNormala;
+          };
+
+          layout(std140) uniform SvjetloMaterijal {
+             svojstvaSvjetla u_svjetlo;
+             svojstvaMaterijala u_materijal;
+             vec3 u_globalniAmbijent;
+          };
+
+          out vec3 v_boja;
+          
+          void main(void) {
+          v_boja = u_globalniAmbijent * u_materijal.ambient + u_materijal.emissive;
+        
+          //transformiraj vrh
+          vec4 vrh = u_matricaModel * vec4(a_position, 1.0);
+          //transformiraj normalu
+          vec3 N = normalize(u_matricaNormala * a_normala);
+          //vec3 N = a_normala;
+
+          //normirani vektor smjera svjetla i suprotne orijentacije
+          vec3 L;
+          if (u_svjetlo.position.w == 0.0) L = normalize(u_svjetlo.position.xyz);
+          else L = normalize(u_svjetlo.position.xyz - vrh.xyz);
+          //Lambertov faktor
+          float Lambert = dot(N,L);
+          //ambijentalna komponenta
+          vec3 Ia = u_svjetlo.ambient * u_materijal.ambient;
+          //difuzna komponenta
+          vec3 Id = vec3(0.0, 0.0, 0.0);
+          //zrcalna komponenta
+          vec3 Is = vec3(0.0, 0.0, 0.0);
+
+          if (Lambert > 0.0) {
+            Id = u_svjetlo.diffuse * u_materijal.diffuse * Lambert;
+            vec3 V = normalize(-vrh.xyz);
+            vec3 R = reflect(-L, N);
+            float Spec = pow(max(dot(R, V), 0.0), u_materijal.shininess);
+            Is = u_svjetlo.specular * u_materijal.specular * Spec;
+          }
+
+          v_boja += Is + Ia + Id;
+
+          gl_Position = u_matricaProjekcija * vec4(a_position, 1.0);
+          }
+        </script>
+
+        <script id="fragment-shader1" type="x-shader/x-fragment">
+          #version 300 es
+          precision highp float;
+          in vec3 v_boja;
+          out vec4 outColor;
+
+          void main(void)  {
+          outColor = vec4(v_boja, 1);
+          }
+        </script>
+
+        <script id="vertex-shader2" type="x-shader/x-vertex">
+         #version 300 es
+         layout(location = 0) in vec3 a_position;
+         layout(location = 1) in vec3 a_normala;
+         layout(location = 2) in vec3 a_tangenta;
+         layout(location = 3) in vec2 a_tekstura;
+
+         struct svojstvaSvjetla {
+            vec4 position; //ako je w=0, onda se radi o usmjerenom svjetlu; inace je w = 1
+            vec3 ambient;
+            vec3 diffuse;
+            vec3 specular;
+          };
+
+          struct svojstvaMaterijala {
+            vec3 ambient;
+            vec3 diffuse;
+            vec3 specular;
+            vec3 emissive;
+            float shininess;
+          };
+
+         layout(std140) uniform Matrice {
+              mat4 u_matricaModel;
+              mat4 u_matricaProjekcija;
+              mat3 u_matricaNormala;
+         };
+
+         layout(std140) uniform SvjetloMaterijal {
+             svojstvaSvjetla u_svjetlo;
+             svojstvaMaterijala u_materijal;
+             vec3 u_globalniAmbijent;
+         };
+
+         out vec4 v_tsPozicijaSvjetla;
+         out vec3 v_tsVrh;
+         out vec2 v_tekstura;
+
+         void main(void) {
+           vec3 binormala = cross(a_tangenta, a_normala);
+           //transformiraj vrh
+           vec4 vrh = u_matricaModel * vec4(a_position, 1.0);
+           //transformiraj vektore
+           vec3 t = normalize(u_matricaNormala * a_tangenta);
+           vec3 n = normalize(u_matricaNormala * a_normala);
+           vec3 b = normalize(u_matricaNormala * binormala);
+           mat3 TBN = mat3(t,b,n);
+
+           v_tsPozicijaSvjetla = vec4(u_svjetlo.position.xyz * TBN, u_svjetlo.position.w);
+           v_tsVrh = vrh.xyz * TBN;
+           v_tekstura = a_tekstura;
+
+           gl_Position = u_matricaProjekcija * vec4(a_position, 1.0);
+         }
+        </script>
+
+        <script id="fragment-shader2" type="x-shader/x-fragment">
+          #version 300 es
+          precision highp float;    
+
+          struct svojstvaSvjetla {
+            vec4 position; //ako je w=0, onda se radi o usmjerenom svjetlu; inace je w = 1
+            vec3 ambient;
+            vec3 diffuse;
+            vec3 specular;
+          };
+
+          struct svojstvaMaterijala {
+            vec3 ambient;
+            vec3 diffuse;
+            vec3 specular;
+            vec3 emissive;
+            float shininess;
+          };
+
+          layout(std140) uniform SvjetloMaterijal {
+             svojstvaSvjetla u_svjetlo;
+             svojstvaMaterijala u_materijal;
+             vec3 u_globalniAmbijent;
+         };
+
+          uniform sampler2D u_slika;
+          uniform sampler2D u_normalMap;
+          uniform int u_bump_verzija;
+          uniform int u_show_tex;
+
+          in vec4 v_tsPozicijaSvjetla;
+          in vec3 v_tsVrh;
+          in vec2 v_tekstura;
+          out vec4 outColor;
+
+          void main(void) {
+            vec3 boja, normala;
+            if (u_bump_verzija > 0) normala = normalize(texture(u_normalMap, v_tekstura).rgb * 2.0 - 1.0);
+            else normala = vec3(0,0,1);
+
+            //normirani vektor smjera svjetla i suprotne orijentacije
+            vec3 L;
+            if (v_tsPozicijaSvjetla.w == 0.0) L = normalize(v_tsPozicijaSvjetla.xyz);
+            else L = normalize(v_tsPozicijaSvjetla.xyz - v_tsVrh);
+            //Lambertov faktor
+            float Lambert = dot(normala, L);
+            //ambijentalna komponenta
+            vec3 Ia = u_svjetlo.ambient * u_materijal.ambient;
+            //difuzna komponenta
+            vec3 Id = vec3(0.0, 0.0, 0.0);
+            //zrcalna komponenta
+            vec3 Is = vec3(0.0, 0.0, 0.0);
+
+            if (Lambert > 0.0) {
+              Id = u_svjetlo.diffuse * u_materijal.diffuse * Lambert;
+              vec3 V = normalize(-v_tsVrh);
+              vec3 R = reflect(-L, normala);
+              float Spec = pow(max(dot(R, V), 0.0), u_materijal.shininess);
+              Is = u_svjetlo.specular * u_materijal.specular * Spec;
+            }
+
+            vec3 tx = vec3(texture(u_slika, v_tekstura));
+
+            if (u_show_tex == 1) boja = u_globalniAmbijent * u_materijal.ambient + Ia + Id + Is + u_materijal.emissive + tx - vec3(0.8);
+            else boja = u_globalniAmbijent * u_materijal.ambient + Ia + Id + Is + u_materijal.emissive - vec3(0.3);
+
+            outColor = vec4(boja, 1);
+          }
+        </script>
+
+    </head>
+
+    <body>
+      <script src="skripte/info.js"></script>
+      <div id="infoButton"></div>
+      <div id="infoBox" title="Help">
+
+              <p>Ovaj help možete zatvoriti i ponovo ga otvoriti klikom na <i>info</i> ikonu u gornjem lijevom kutu.</p>
+              <p><b>Tastatura</b></p>
+              <ul style="margin-left: -20px;">
+              <li style="margin-bottom: 5px;">Tipke &#8678; i &#8680;: rotacija kugle globusa oko osi držača te kugle</li>
+              <li style="margin-bottom: 5px;">Tipke &#8679; i &#8681;: udaljavanje i približavanje od globusa</li>
+              <li style="margin-bottom: 5px;">Tipka <code>A</code>: pokretanje i zaustavljanje animacije rotacije kugle globusa oko osi držača</li>
+              <li style="margin-bottom: 5px;">Tipka <code>T</code>: prikazivanje i skrivanje teksture na kugli globusa</li>
+              <li style="margin-bottom: 5px;">Tipka <code>B</code>: biranje između dvije verzije bump mappinga i treće verzije bez bump mappinga. Pritiskanjem tipke <code>B</code> se ciklički mijenjaju te tri opcije.</li>
+              </ul>
+              <p><b>Miš</b></p>
+              <ul style="margin-left: -20px;">
+                <li style="margin-bottom: 5px;">Pritisnuta lijeva tipka miša + micanje miša lijevo/desno: rotacija globusa oko vertikalne osi</li>
+                <li style="margin-bottom: 5px;">Pritisnuta desna tipka miša + micanje miša gore/dolje: spuštanje i podizanje kamere pri čemu se točka prema kojoj kamera gleda ne mijenja.</li>
+              </ul>
+        </div>
+
+      <canvas id="kan">
+          Your browser does not support HTML5 canvas.
+      </canvas>
+    </body>
+
+</html>
